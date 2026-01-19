@@ -2,192 +2,206 @@ package proxies
 
 import (
 	"fmt"
-	"strconv"
+	"regexp"
 	"strings"
 )
 
-// GenerateProxyKey 生成代理节点的唯一指纹
+// 域名/IP 正则：允许字母、数字、点、横线、冒号(IPv6)
+var domainRegex = regexp.MustCompile(`^[a-zA-Z0-9\.\-\:]+$`)
+
+// GenerateProxyKey 生成代理节点的唯一指纹 (智能去重版 V3)
 func GenerateProxyKey(p map[string]any) string {
 	var sb strings.Builder
-	// 预估长度，稍微加大一点以容纳复杂协议
 	sb.Grow(192)
 
-	// 1. 基础三元组: Type|Server|Port
-	// Type 归一化为小写，防止 "Vmess" 和 "vmess" 被视为不同
-	if v, ok := p["type"]; ok {
-		if s, ok := v.(string); ok {
-			sb.WriteString(strings.ToLower(s))
-		} else {
-			fmt.Fprint(&sb, v)
-		}
-	}
-	sb.WriteByte('|')
+	// 基础数据提取
 
-	writeString(&sb, p, "server")
-	sb.WriteByte('|')
-
-	if v, ok := p["port"]; ok {
-		switch val := v.(type) {
-		case int:
-			sb.WriteString(strconv.Itoa(val))
-		case string:
-			sb.WriteString(val)
-		case float64:
-			// 处理 JSON 解析可能出现的 float64
-			sb.WriteString(strconv.Itoa(int(val)))
-		default:
-			// 只有极少数奇怪类型才回退到反射
-			fmt.Fprint(&sb, val)
-		}
-	}
-	sb.WriteByte('|')
-
-	// 2. 身份凭证 (Credentials)
-	// 不同协议使用不同的认证方式，为防止冲突，我们尽可能写入所有存在的凭证字段
-	// 使用短前缀节省内存
-
-	// Password (通用: SS, Trojan, VLESS, VMess, Hysteria2, SSH, TUIC, HTTP, Socks)
-	writeStringWithPrefix(&sb, p, "password", "pw:")
-	// UUID (VMess, VLESS, TUIC)
-	writeStringWithPrefix(&sb, p, "uuid", "id:")
-	// Username (SSH, HTTP, Socks, Mieru)
-	writeStringWithPrefix(&sb, p, "username", "usr:")
-	// Token (TUIC)
-	writeStringWithPrefix(&sb, p, "token", "tok:")
-	// PSK (Snell)
-	writeStringWithPrefix(&sb, p, "psk", "psk:")
-	// Auth-Str (Hysteria 1)
-	writeStringWithPrefix(&sb, p, "auth-str", "auth:")
-	// Private Key (WireGuard, SSH) - 它是客户端身份的核心
-	writeStringWithPrefix(&sb, p, "private-key", "pk:")
-	// Public Key (WireGuard) - 它是服务端身份的核心
-	writeStringWithPrefix(&sb, p, "public-key", "pub:")
-
-	sb.WriteByte('|')
-
-	// 3. TLS/SNI/Host 归一化
-	// 即使协议不同，TLS 开关状态也是核心区别
-	if v, ok := p["tls"]; ok {
-		if isTrue(v) {
-			sb.WriteString("tls:1|")
-		} else {
-			sb.WriteString("tls:0|")
-		}
+	// Server 地址 (转小写)
+	serverAddr := ""
+	if v, ok := p["server"]; ok {
+		serverAddr = strings.ToLower(fmt.Sprint(v))
 	}
 
-	// SNI 归一化：sni > servername > obfs-opts.host (Snell)
-	// 只要有一个存在，就写入 "sni:xxx|"
-	if !writeStringWithPrefix(&sb, p, "sni", "sni:") {
-		if !writeStringWithPrefix(&sb, p, "servername", "sni:") {
-			// Snell 特殊处理: obfs-opts: { host: bing.com }
-			if opts, ok := p["obfs-opts"].(map[string]any); ok {
-				writeStringWithPrefix(&sb, opts, "host", "sni:")
+	// 提取 SNI 和 Host
+	rawSNI := ""
+	if v, ok := p["servername"].(string); ok {
+		rawSNI = v
+	}
+	if v, ok := p["sni"].(string); ok {
+		rawSNI = v
+	}
+
+	rawHost := ""
+	if opts, ok := p["ws-opts"].(map[string]any); ok {
+		if h, k := opts["headers"].(map[string]any); k {
+			if v, k2 := h["Host"].(string); k2 {
+				rawHost = v
 			}
 		}
 	}
+	if v, ok := p["host"].(string); ok {
+		rawHost = v
+	}
+	if opts, ok := p["obfs-opts"].(map[string]any); ok {
+		if v, k := opts["host"].(string); k {
+			rawHost = v
+		}
+	}
 
-	// 4. 传输层与网络 (Network / Transport)
-	// VMess/Trojan/VLESS 使用 "network"
+	// 清洗并转小写
+	sni := cleanDomain(rawSNI)
+	host := cleanDomain(rawHost)
+
+	// 只有当 SNI 为空，但 Host 有效时，才将 Host 视为 SNI
+	// 解决 sni=example.com 与 (no sni, host=example.com) 无法合并的问题
+	if sni == "" && host != "" {
+		sni = host
+	}
+
+	//  如果 SNI/Host 等于 Server IP，视为无效
+	// 解决: sni=1.2.3.4 与 sni=空 无法合并的问题
+	if sni == serverAddr {
+		sni = ""
+	}
+	if host == serverAddr {
+		host = ""
+	}
+
+	// 构建 Key (Type|Server|Port) ---
+	if v, ok := p["type"].(string); ok {
+		sb.WriteString(strings.ToLower(v))
+	}
+	sb.WriteByte('|')
+	sb.WriteString(serverAddr)
+	sb.WriteByte('|')
+	if v, ok := p["port"]; ok {
+		sb.WriteString(fmt.Sprint(v))
+	}
+	sb.WriteByte('|')
+
+	// 身份凭证 (核心 ID)
+	foundCred := false
+	if writeStringWithPrefix(&sb, p, "uuid", "id:") {
+		foundCred = true
+	}
+	if !foundCred {
+		if writeStringWithPrefix(&sb, p, "password", "pw:") {
+			foundCred = true
+		}
+	}
+	if !foundCred {
+		writeStringWithPrefix(&sb, p, "psk", "psk:")
+		writeStringWithPrefix(&sb, p, "token", "tok:")
+		writeStringWithPrefix(&sb, p, "username", "usr:")
+	}
+	writeStringWithPrefix(&sb, p, "auth-str", "auth:")
+	writeStringWithPrefix(&sb, p, "private-key", "pk:")
+	writeStringWithPrefix(&sb, p, "flow", "flow:") // XTLS Flow 必须区分
+
+	// 网络与传输
 	writeStringWithPrefix(&sb, p, "network", "net:")
-	// Mieru 使用 "transport"
 	writeStringWithPrefix(&sb, p, "transport", "net:")
 
-	// 5. 传输层细节 (Path, ServiceName, Reality)
+	// TLS 状态必须区分 (ws 和 wss 是两码事)
+	if v, ok := p["tls"]; ok && isTrue(v) {
+		sb.WriteString("tls:1|")
+	} else {
+		sb.WriteString("tls:0|")
+	}
+
+	// 路径 Path (严格区分)
+	// Path 决定了 Nginx/Xray 的分流，不同的 Path 就是不同的入口
+	path := ""
 	if opts, ok := p["ws-opts"].(map[string]any); ok {
-		writeStringWithPrefix(&sb, opts, "path", "ws:")
-		// Headers 里的 Host 有时也作为区分依据，但通常 SNI 已经覆盖了
+		if v, k := opts["path"].(string); k {
+			path = v
+		}
+	} else if opts, ok := p["http-opts"].(map[string]any); ok {
+		if v, k := opts["path"].(string); k {
+			path = v
+		}
+	} else if opts, ok := p["grpc-opts"].(map[string]any); ok {
+		if v, k := opts["grpc-service-name"].(string); k {
+			path = v
+		}
 	}
-	if opts, ok := p["grpc-opts"].(map[string]any); ok {
-		writeStringWithPrefix(&sb, opts, "grpc-service-name", "grpc:")
+
+	if path != "" {
+		cleanedPath := cleanPath(path)
+		if cleanedPath != "" && cleanedPath != "/" {
+			sb.WriteString("path:")
+			sb.WriteString(cleanedPath)
+			sb.WriteByte('|')
+		}
 	}
+
+	// 最终写入 SNI/Host
+	if sni != "" {
+		sb.WriteString("sni:")
+		sb.WriteString(sni)
+		sb.WriteByte('|')
+	}
+
+	// 只有当 Host 存在且与 SNI 不同时 (CDN 场景)，Host 才有区分意义
+	// 如果它们相同，上面的 SNI 已经包含了这个信息
+	if host != "" && host != sni {
+		sb.WriteString("host:")
+		sb.WriteString(host)
+		sb.WriteByte('|')
+	}
+
+	// Reality 公钥
 	if opts, ok := p["reality-opts"].(map[string]any); ok {
-		// Reality 的公钥决定了它伪装的目标，必须区分
 		writeStringWithPrefix(&sb, opts, "public-key", "rea:")
-		// short-id 也可以区分，但通常 pub key 变了 short-id 也会变
-		writeStringWithPrefix(&sb, opts, "short-id", "sid:")
 	}
-
-	// 6. 协议特定细节 (Shadowsocks, SSR, Hysteria, Snell)
-
-	// Cipher (SS, SSR, VMess)
-	writeStringWithPrefix(&sb, p, "cipher", "cip:")
-
-	// SS Plugin / Obfs
-	if !writeStringWithPrefix(&sb, p, "plugin", "plg:") {
-		// SSR / Hysteria Obfs
-		writeStringWithPrefix(&sb, p, "obfs", "obfs:")
-	}
-
-	// SS Plugin Opts (Mode)
-	if opts, ok := p["plugin-opts"].(map[string]any); ok {
-		writeStringWithPrefix(&sb, opts, "mode", "plg-m:")
-	}
-
-	// Snell Obfs Opts (Mode) - Snell 的混淆模式
-	if opts, ok := p["obfs-opts"].(map[string]any); ok {
-		writeStringWithPrefix(&sb, opts, "mode", "obfs-m:")
-	}
-
-	// SSR Protocol
-	writeStringWithPrefix(&sb, p, "protocol", "proto:")
-
-	// VLESS Flow (XTLS)
-	writeStringWithPrefix(&sb, p, "flow", "flow:")
-
-	// Hysteria 2 Obfs Password
-	writeStringWithPrefix(&sb, p, "obfs-password", "hy2pw:")
-
-	// TUIC / WireGuard 特殊字段
-	writeStringWithPrefix(&sb, p, "udp-relay-mode", "udp-m:")
-	writeStringWithPrefix(&sb, p, "ip", "ip:") // WireGuard endpoint IP different from server domain?
-	writeStringWithPrefix(&sb, p, "ipv6", "v6:")
 
 	return sb.String()
 }
 
 // --- 辅助函数 ---
 
-// writeString 写入值
-func writeString(sb *strings.Builder, m map[string]any, key string) bool {
-	val, ok := m[key]
-	if !ok || val == nil {
-		return false
+// cleanDomain 验证并清洗域名，统一小写
+func cleanDomain(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 128 {
+		return ""
 	}
-	// Fast path for string
-	if s, ok := val.(string); ok {
-		if s == "" {
-			return false
-		}
-		sb.WriteString(s)
-		return true
+	// 移除可能存在的 URL 编码残留 (简单处理)
+	// 如果数据源已经是解码过的，这步可以省略
+	// if strings.Contains(s, "%") {
+	// 	// 这里假设外部已经做了解码，如果没有，需要 url.QueryUnescape
+	// 	// 为安全起见，如果不符合域名正则，直接丢弃
+	// }
+
+	if !domainRegex.MatchString(s) {
+		return ""
 	}
-	// Fallback
-	s := fmt.Sprint(val)
-	if s == "" {
-		return false
-	}
-	sb.WriteString(s)
-	return true
+	return strings.ToLower(s)
 }
 
-// writeStringWithPrefix 带前缀写入
+// cleanPath 移除 ? 及其后面的 Query 参数
+func cleanPath(path string) string {
+	if idx := strings.Index(path, "?"); idx != -1 {
+		return path[:idx]
+	}
+	return path
+}
+
 func writeStringWithPrefix(sb *strings.Builder, m map[string]any, key, prefix string) bool {
 	val, ok := m[key]
 	if !ok || val == nil {
 		return false
 	}
-	// Fast path for string
 	if s, ok := val.(string); ok {
 		s = strings.TrimSpace(s)
 		if s == "" {
 			return false
 		}
 		sb.WriteString(prefix)
-		sb.WriteString(s)
+		sb.WriteString(strings.ToLower(s))
 		sb.WriteByte('|')
 		return true
 	}
-	// Fallback for non-string (int, float, etc)
 	s := fmt.Sprint(val)
 	if s == "" {
 		return false
@@ -198,7 +212,6 @@ func writeStringWithPrefix(sb *strings.Builder, m map[string]any, key, prefix st
 	return true
 }
 
-// isTrue 判断布尔真值
 func isTrue(v any) bool {
 	switch val := v.(type) {
 	case bool:
@@ -206,7 +219,8 @@ func isTrue(v any) bool {
 	case int:
 		return val != 0
 	case string:
-		return val == "true" || val == "TRUE" || val == "1"
+		val = strings.ToLower(val)
+		return val == "true" || val == "1"
 	}
 	return false
 }
