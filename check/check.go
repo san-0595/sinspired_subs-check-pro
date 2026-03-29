@@ -493,7 +493,10 @@ func (pc *ProxyChecker) distributeJobs(proxies []map[string]any, ctx context.Con
 	proxyIndex.Store(-1) // 初始化为 -1
 
 	// 定义主动 GC 的阈值
-	const gcThreshold = 200000
+	var gcThreshold = config.GlobalConfig.GCThreshold
+	if gcThreshold == 0 {
+		gcThreshold = 20000
+	}
 
 	// 启动工作协程池
 	for range concurrency {

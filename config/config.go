@@ -52,6 +52,7 @@ type Config struct {
 	DownloadMB           int      `yaml:"download-mb"`
 	TotalSpeedLimit      int      `yaml:"total-speed-limit"`
 	Threshold            float32  `yaml:"threshold"`
+	GCThreshold          int64    `yaml:"gc-threshold"`
 	MinSpeed             int      `yaml:"min-speed"`
 	MediaCheckTimeout    int      `yaml:"media-check-timeout"`
 	FilterRegex          string   `yaml:"filter-regex"`
@@ -134,6 +135,9 @@ var OriginDefaultConfig = &Config{
 	DownloadMB:       20,
 	EnableSelfUpdate: true,
 	CronCheckUpdate:  "0 0,9,21 * * *",
+
+	Threshold:   0.75,
+	GCThreshold: 20000,
 
 	SubProcess: SubProcessConfig{
 		ResolveDomain:   false,

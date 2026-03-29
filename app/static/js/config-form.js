@@ -449,6 +449,15 @@ const SCHEMA = [
         ],
       },
       {
+        title: '内存优化',
+        fields: [
+          {
+            key: 'gc-threshold', label: '主动内存回收阈值', type: 'number', min: 10000, placeholder: '50000',
+            hint: '每处理一定数量节点立即降低内存'
+          },
+        ],
+      },
+      {
         title: 'Sub-Store',
         fields: [
           { key: 'sub-store-port', label: '监听端口', type: 'text', placeholder: ':8299', hint: 'sub-store的启动端口，为空则不启动sub-store' },
@@ -552,6 +561,8 @@ const FIELD_VALIDATORS = {
   'success-limit': v => { const n = Number(v); if (n > 0 && n < 5) return { level: 'info', msg: `保存上限 ${n} 较少，建议 100-200` }; if (n >= 100 && n < 200) return { level: 'info', msg: `保存上限 ${n}，视手机性能，mihomo 类 VPN 超过 100 个节点会增加分组切换压力` }; if (n > 200) return { level: 'warn', msg: `保存上限 ${n} 较多，建议不超过 200` }; return null; },
   'media-check-timeout': v => { if (Number(v) === 0) return { level: 'warn', msg: '未设置，默认为 10s' }; if (Number(v) < 5) return { level: 'warn', msg: '媒体解锁超时太小，可能无法获取结果' }; if (Number(v) > 15) return { level: 'warn', msg: '媒体解锁检测超时太高，建议 5-15 秒' }; return null; },
 
+  'gc-threshold': v => { const n = Number(v); if (n === 0) return { level: 'info', msg: `默认阈值 20000` }; if (n > 0 && n < 10000) return { level: 'warn', msg: `阈值 ${n}太低，将导致频繁内存回收，增加 CPU 压力` }; if (n >= 10000 && n <= 100000) return { level: 'info', msg: `阈值 ${n} 适合中等数量订阅池` }; if (n > 100000) return { level: 'warn', msg: `阈值 ${n} 较高，请关注运行时内存占用` }; return null; },
+
   /* success-rate 校验：入参为界面显示值（0–100%），存储值为其 ÷1000 */
   'success-rate': v => {
     const n = Number(v);
@@ -638,7 +649,7 @@ const SPECIAL_INPUT_VALUES = {
   'mihomo-overwrite-url': [
     { value: 'http://127.0.0.1:8199/Sinspired_Rules_CDN.yaml', label: 'Sinspired 内置', hint: '根据解锁标签定制' },
     { value: 'http://127.0.0.1:8199/ACL4SSR_Online_Full.yaml', label: 'ACL4SSR 规则', hint: '经典分流规则' },
-  ]
+  ],
 };
 
 /* ═══════════════════════════ Cron 段元数据 ═══════════════════════════ */
