@@ -3,7 +3,9 @@ package check
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net"
@@ -14,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/juju/ratelimit"
@@ -55,6 +58,8 @@ var (
 	mediaON        bool
 	progressWeight ProgressWeight
 )
+
+const MediaCheckMaxRetries = 3
 
 // Result 存储节点检测结果
 type Result struct {
@@ -843,7 +848,15 @@ func checkOnePlatform(job *ProxyJob, plat string, mediaClient *http.Client, db *
 		if job.NeedCF && !job.IsCfAccessible {
 			break
 		}
-		cookiesOK, clientOK := platform.CheckOpenAI(mediaClient)
+		var cookiesOK, clientOK bool
+		err := withRetry(ctx, func() error {
+			var e error
+			cookiesOK, clientOK, e = platform.CheckOpenAI(mediaClient)
+			return e
+		})
+		if err != nil {
+			break
+		}
 		if clientOK && cookiesOK {
 			job.Result.Openai = true
 		} else if clientOK || cookiesOK {
@@ -853,25 +866,64 @@ func checkOnePlatform(job *ProxyJob, plat string, mediaClient *http.Client, db *
 		if job.NeedCF && !job.IsCfAccessible {
 			break
 		}
-		job.Result.Copilot, job.Result.CopilotAPI = platform.CheckCopilot(mediaClient)
+		var homeOK, apiOK bool
+		err := withRetry(ctx, func() error {
+			var e error
+			homeOK, apiOK, e = platform.CheckCopilot(mediaClient)
+			return e
+		})
+		if err != nil {
+			break
+		}
+		job.Result.Copilot, job.Result.CopilotAPI = homeOK, apiOK
 	case "youtube":
-		if region, _ := platform.CheckYoutube(mediaClient); region != "" {
+		var region string
+		withRetry(ctx, func() error { //nolint:errcheck
+			var e error
+			region, e = platform.CheckYoutube(mediaClient)
+			return e
+		})
+		if region != "" {
 			job.Result.Youtube = region
 		}
 	case "netflix":
-		if ok, _ := platform.CheckNetflix(mediaClient); ok {
+		var ok bool
+		withRetry(ctx, func() error { //nolint:errcheck
+			var e error
+			ok, e = platform.CheckNetflix(mediaClient)
+			return e
+		})
+		if ok {
 			job.Result.Netflix = true
 		}
 	case "disney":
-		if ok, _ := platform.CheckDisney(mediaClient); ok {
+		var ok bool
+		withRetry(ctx, func() error { //nolint:errcheck
+			var e error
+			ok, e = platform.CheckDisney(mediaClient)
+			return e
+		})
+		if ok {
 			job.Result.Disney = true
 		}
 	case "gemini":
-		if status, err := platform.CheckGemini(mediaClient); err == nil {
+		var status platform.GeminiStatus
+		withRetry(ctx, func() error { //nolint:errcheck
+			var e error
+			status, e = platform.CheckGemini(mediaClient)
+			return e
+		})
+		if status.Region != "" {
 			job.Result.Gemini = status
 		}
 	case "tiktok":
-		if region, _ := platform.CheckTikTok(mediaClient); region != "" {
+		var region string
+		withRetry(ctx, func() error { //nolint:errcheck
+			var e error
+			region, e = platform.CheckTikTok(mediaClient)
+			return e
+		})
+		if region != "" {
 			job.Result.TikTok = region
 		}
 	case "iprisk":
@@ -882,7 +934,13 @@ func checkOnePlatform(job *ProxyJob, plat string, mediaClient *http.Client, db *
 		job.Result.IP = ip
 		job.Result.Country = country
 		job.Result.CountryCodeTag = countryCodeTag
-		if risk, err := platform.CheckIPRisk(mediaClient, ip); err == nil {
+		var risk string
+		err := withRetry(ctx, func() error {
+			var e error
+			risk, e = platform.CheckIPRisk(mediaClient, ip)
+			return e
+		})
+		if err == nil {
 			job.Result.IPRisk = risk
 		} else {
 			// 失败的可能性高，所以放上日志
@@ -1218,4 +1276,50 @@ func checkCtxDone(c context.Context) bool {
 	default:
 		return false
 	}
+}
+
+// isRetryable 判断错误是否值得重试（仅网络层瞬时故障）
+func isRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	// 明确不重试：context 被外部取消（超出全局限制等）
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	// 重试：超时（含 mediaClient 自身的 Timeout）
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		// Timeout() 涵盖 i/o timeout、TLS handshake timeout 等
+		return netErr.Timeout()
+	}
+	// connection reset by peer / unexpected EOF
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	return false
+}
+
+// withRetry 只在 isRetryable 时重试，否则直接返回
+func withRetry(ctx context.Context, fn func() error) error {
+	var err error
+	for i := range MediaCheckMaxRetries {
+		if i > 0 {
+			// 指数退避，但不超过全局 timeout
+			wait := time.Duration(i*i) * 200 * time.Millisecond
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+		err = fn()
+		if !isRetryable(err) {
+			return err // 成功 or 明确失败，不重试
+		}
+	}
+	return err
 }

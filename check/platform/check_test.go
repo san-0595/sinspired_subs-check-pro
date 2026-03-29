@@ -54,7 +54,11 @@ func TestCheckCopilot_Success(t *testing.T) {
 	// 使用默认 http.Client
 	client := &http.Client{}
 
-	Copilot, CopilotAPI := CheckCopilot(client)
+	Copilot, CopilotAPI, err := CheckCopilot(client)
+
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	t.Logf("Copilot API: %v", CopilotAPI)
 

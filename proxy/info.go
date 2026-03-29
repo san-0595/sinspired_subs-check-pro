@@ -64,7 +64,7 @@ func NewIPInfoClient(httpClient *http.Client, db *maxminddb.Reader, ipList, geoL
 // - NodeWithoutCF: HK²
 //
 // - 前两位字母是实际浏览网站识别的位置, -US⁰为使用CF CDN服务的网站识别的位置, 比如GPT, X等
-func GetProxyCountry(httpClient *http.Client, db *maxminddb.Reader, GetAnalyzedCtx context.Context, cfLoc string, cfIP string) (loc string, ip string, countryCodeTag string, err error) {
+func GetProxyCountry(httpClient *http.Client, db *maxminddb.Reader, getAnalyzedCtx context.Context, cfLoc string, cfIP string) (loc string, ip string, countryCodeTag string, err error) {
 	// 设置一个临时环境变量，以排除部分api因数据库更新不及时返回的 CN
 	os.Setenv("SUBS-CHECK-PRO-CALL", "true")
 	defer os.Unsetenv("SUBS-CHECK-PRO-CALL")
@@ -78,7 +78,7 @@ func GetProxyCountry(httpClient *http.Client, db *maxminddb.Reader, GetAnalyzedC
 	}
 
 	for range config.GlobalConfig.SubUrlsReTry {
-		loc, ip, countryCodeTag, err = cliMe.GetAnalyzed(GetAnalyzedCtx, cfLoc, cfIP)
+		loc, ip, countryCodeTag, err = cliMe.GetAnalyzed(getAnalyzedCtx, cfLoc, cfIP)
 		if err != nil {
 			slog.Debug(fmt.Sprintf("MeAPI 获取节点位置失败: %v", err))
 		}
@@ -97,10 +97,10 @@ NextClient:
 		slog.Debug(fmt.Sprintf("创建 ipinfo 主客户端失败: %s", err))
 	} else {
 		defer cli.Close()
-		loc, ip, countryCodeTag, err = cli.GetAnalyzed(GetAnalyzedCtx, cfLoc, cfIP)
+		loc, ip, countryCodeTag, err = cli.GetAnalyzed(getAnalyzedCtx, cfLoc, cfIP)
 		if err != nil {
 			slog.Debug(fmt.Sprintf("Analyzed 获取节点位置失败: %v", err))
-			return "", "", "", nil
+			return "", "", "", err
 		}
 		if loc != "" && countryCodeTag != "" {
 			slog.Debug(fmt.Sprintf("Analyzed 获取节点位置成功: %s %s", loc, countryCodeTag))
@@ -109,7 +109,7 @@ NextClient:
 			slog.Debug(fmt.Sprintf("Analyzed 获取节点位置空白: %s-%s", loc, countryCodeTag))
 		}
 	}
-	return "", "", "", nil
+	return "", "", "", err
 }
 
 func GetEdgeOneProxy(httpClient *http.Client) (loc string, ip string) {
