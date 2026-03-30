@@ -183,7 +183,7 @@ func NewProxyChecker(proxyCount int) *ProxyChecker {
 		// 超大线程数
 		if threadCount > 1000 {
 			slog.Info("除非你的 CPU 和路由器同时允许, 超过 1000 并发可能影响其它上网程序,如确有需求,请在配置文件分别指定测活-测速-媒体检测每个阶段并发数")
-			slog.Info(fmt.Sprintf("已限制测活并发数: %d", aliveConc))
+			slog.Info("已限制测活并发数", "并发", aliveConc)
 		}
 	}
 
@@ -239,19 +239,19 @@ func Check() ([]Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("获取节点失败: %w", err)
 	}
-	slog.Info(fmt.Sprintf("已获取节点数量: %d", rawCount))
-	slog.Info(fmt.Sprintf("去重后节点数量: %d", len(proxies)))
+	slog.Info("已获取节点", "数量", rawCount)
+	slog.Info("去重后节点", "数量", len(proxies))
 
 	proxyutils.ClearCache()
 
 	debug.FreeOSMemory()
 
 	if subWasSuccedLength > 0 {
-		slog.Info(fmt.Sprintf("已加载上次检测可用节点，数量: %d", subWasSuccedLength))
+		slog.Info("已加载上次检测可用节点", "数量", subWasSuccedLength)
 	}
 
 	if historyLength > 0 {
-		slog.Info(fmt.Sprintf("已加载历次检测可用节点，数量: %d", historyLength))
+		slog.Info("已加载历次检测可用节点", "数量", historyLength)
 	}
 
 	// 设置之前成功的节点顺序在前
@@ -463,7 +463,7 @@ func (pc *ProxyChecker) run(proxies []map[string]any) ([]Result, error) {
 	ETASeconds.Store(0)
 
 	slog.Info(fmt.Sprintf("可用节点数量: %d", len(pc.results)))
-	CheckTraffic = utils.FormatTraffic(uint64(TotalBytes.Load()))
+	CheckTraffic = utils.FormatTraffic(TotalBytes.Load())
 	slog.Info(fmt.Sprintf("检测消耗流量: %s", CheckTraffic))
 	slog.Debug("流量", "UP", UP.Load(), "DOWN", DOWN.Load())
 
@@ -587,6 +587,9 @@ func (pc *ProxyChecker) runAliveStage(ctx context.Context) {
 		wg.Go(func() {
 			for job := range pc.aliveChan {
 				if checkCtxDone(ctx) {
+					if job.aliveMarked.CompareAndSwap(false, true) {
+						pc.pt.CountAlive(false)
+					}
 					job.Close()
 					continue
 				}
@@ -665,6 +668,9 @@ func (pc *ProxyChecker) runSpeedStage(ctx context.Context, cancel context.Cancel
 		wg.Go(func() {
 			for job := range pc.speedChan {
 				if checkCtxDone(ctx) {
+					if job.speedMarked.CompareAndSwap(false, true) {
+						pc.pt.CountSpeed(false)
+					}
 					job.Close()
 					continue
 				}
@@ -687,7 +693,6 @@ func (pc *ProxyChecker) runSpeedStage(ctx context.Context, cancel context.Cancel
 				if config.GlobalConfig.SuccessLimit > 0 && pc.available.Load() >= config.GlobalConfig.SuccessLimit {
 					stopOnce.Do(func() {
 						Successlimited.Store(true)
-						pc.pt.FinishAliveStage()
 						if mediaON {
 							if speedON {
 								Successlimited.Store(true)
@@ -749,6 +754,9 @@ func (pc *ProxyChecker) runMediaStageAndCollect(db *maxminddb.Reader, ctx contex
 					// 只在没开启测速时接受媒体检测停止信号
 					// 丢弃结果
 					if checkCtxDone(ctx) {
+						if job.mediaMarked.CompareAndSwap(false, true) {
+							pc.pt.CountMedia()
+						}
 						job.Close()
 						continue
 					}
@@ -989,10 +997,11 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 		name = regexp.MustCompile(`\s*\|(?:\s*[\d.]+[KM]B/s)`).ReplaceAllString(name, "")
 		var speedStr string
 		if speed < 100 {
-			speedStr = fmt.Sprintf("%dKB/s", speed)
+			speedStr = strconv.Itoa(speed) + "KB/s"
 		} else {
-			speedStr = fmt.Sprintf("%.1fMB/s", float64(speed)/1024)
+			speedStr = strconv.FormatFloat(float64(speed)/1024, 'f', 1, 64) + "MB/s"
 		}
+
 		tags = append(tags, speedStr)
 	}
 
@@ -1046,7 +1055,7 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 					tag = "GM⁻"
 				}
 				if g.Region != res.Country {
-					tag = fmt.Sprintf("%s-%s", tag, g.Region)
+					tag = tag + "-" + g.Region
 				}
 				tags = append(tags, tag)
 			}
@@ -1058,7 +1067,7 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 			if res.Youtube != "" {
 				// 只有YouTube地区和节点位置不一致时才添加YouTube地区
 				if res.Country != res.Youtube {
-					tags = append(tags, fmt.Sprintf("YT-%s", res.Youtube))
+					tags = append(tags, "YT-"+res.Youtube)
 				} else {
 					tags = append(tags, "YT")
 				}
@@ -1067,7 +1076,7 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 			if res.TikTok != "" {
 				// 只有TikTok地区和节点位置不一致时才添加TikTok地区
 				if res.Country != res.TikTok {
-					tags = append(tags, fmt.Sprintf("TK-%s", res.TikTok))
+					tags = append(tags, "TK-"+res.TikTok)
 				} else {
 					tags = append(tags, "TK")
 				}

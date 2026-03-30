@@ -3,7 +3,9 @@ package check
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -39,6 +41,8 @@ type ProgressTracker struct {
 
 	// 确保进度条输出完成
 	finalized atomic.Bool
+
+	finishAliveOnce sync.Once
 }
 
 // NewProgressTracker 初始化进度追踪器并重置外部原子变量。
@@ -110,31 +114,35 @@ func (pt *ProgressTracker) CountMedia() {
 
 // FinishAliveStage 在所有存活检测完成后，将追踪器转换到下一阶段。
 func (pt *ProgressTracker) FinishAliveStage() {
-	aliveSucc := int(pt.aliveSuccess.Load())
-	// 如果没有活节点，直接结束
-	if aliveSucc <= 0 && (speedON || mediaON) {
-		pt.Finalize()
-		return
-	}
+	pt.finishAliveOnce.Do(func() {
+		aliveSucc := int(pt.aliveSuccess.Load())
+		// 如果没有活节点，直接结束
+		if aliveSucc <= 0 && (speedON || mediaON) {
+			pt.Finalize()
+			return
+		}
 
-	// 根据配置动态决定下一个阶段
-	if speedON {
-		pt.currentStage.Store(1) // 进入测速阶段
-	} else if mediaON {
-		pt.currentStage.Store(2) // 跳过测速，直接进入媒体检测阶段
-	}
+		// 根据配置动态决定下一个阶段
+		if speedON {
+			pt.currentStage.Store(1) // 进入测速阶段
+		} else if mediaON {
+			pt.currentStage.Store(2) // 跳过测速，直接进入媒体检测阶段
+		}
 
-	if !speedON && !mediaON && config.GlobalConfig.RenameNode {
-		pt.currentStage.Store(-1)
-		CurrentStepName.Store("重命名")
-	}
+		if !speedON && !mediaON && config.GlobalConfig.RenameNode {
+			pt.currentStage.Store(-1)
+		}
 
-	pt.refresh()
+		pt.refresh()
+	})
 }
 
 // FinishSpeedStage 在所有速度测试完成后，将追踪器转换到媒体检测阶段。
 func (pt *ProgressTracker) FinishSpeedStage() {
 	if !mediaON {
+		if config.GlobalConfig.RenameNode {
+			pt.currentStage.Store(-1)
+		}
 		pt.refresh()
 		return
 	}
@@ -143,12 +151,12 @@ func (pt *ProgressTracker) FinishSpeedStage() {
 		pt.Finalize()
 		return
 	}
-	// 切换为媒体检测阶段
-	pt.currentStage.Store(2)
 
-	if !mediaON && config.GlobalConfig.RenameNode {
-		pt.currentStage.Store(-1)
-		CurrentStepName.Store("重命名")
+	// 切换为媒体检测阶段
+	if mediaON {
+		pt.currentStage.Store(2)
+	} else {
+		pt.Finalize()
 	}
 
 	pt.refresh()
@@ -178,19 +186,17 @@ func (pt *ProgressTracker) refresh() {
 
 // refreshDynamic 根据各阶段完成率的加权和来计算进度，支持中途停止信号
 func (pt *ProgressTracker) refreshDynamic() {
+	stopped := Successlimited.Load() || ForceClose.Load()
+
 	// 1. 确定计算基数（分母）
 	// 如果触发了限制（成功数达到 or 强制关闭），分母不再是总订阅数，而是“实际已测活数”
 	// 这样进度条会瞬间适配到剩余任务上。
 	realTotal := int(pt.totalJobs.Load())
 
-	// 关键逻辑修改：处理停止信号
-	if Successlimited.Load() || ForceClose.Load() {
-		aliveDone := int(pt.aliveDone.Load())
-		// 只有当至少跑了一部分时才切换，避免刚开始就除以0
-		if aliveDone > 0 {
-			realTotal = aliveDone
-		}
+	// 处理停止信号
+	if stopped {
 		pt.refreshStage()
+		return
 	}
 
 	if realTotal <= 0 {
@@ -210,15 +216,15 @@ func (pt *ProgressTracker) refreshDynamic() {
 		if total <= 0 {
 			return 0
 		}
-		r := float64(done) / float64(total)
-		if r > 1.0 {
-			return 1.0
+		if r := float64(done) / float64(total); r < 1.0 {
+			return r
 		}
-		return r
+		return 1.0
 	}
 
 	rAlive := ratio(aliveDone, realTotal)
 
+	// 测速完成率：分母为测活成功数
 	rSpeed := 0.0
 	if aliveSucc > 0 {
 		rSpeed = ratio(speedDone, aliveSucc)
@@ -269,8 +275,8 @@ func (pt *ProgressTracker) refreshDynamic() {
 	// ProxyCount 存储当前的“有效总数”
 	ProxyCount.Store(uint32(realTotal))
 
-	mappedProgress := min(uint32(math.Ceil(finalPercent/100.0*float64(realTotal))), uint32(realTotal))
-	Progress.Store(mappedProgress)
+	mapped := uint32(math.Ceil(finalPercent / 100.0 * float64(realTotal)))
+	Progress.Store(min(mapped, uint32(realTotal)))
 }
 
 // refreshStage 分阶段算法：分母动态切换
@@ -289,10 +295,7 @@ func (pt *ProgressTracker) refreshStage() {
 			}
 		}
 
-		done := uint32(pt.aliveDone.Load())
-		if done > total {
-			done = total
-		}
+		done := min(uint32(pt.aliveDone.Load()), total)
 
 		ProxyCount.Store(total)
 		Progress.Store(done)
@@ -307,10 +310,7 @@ func (pt *ProgressTracker) refreshStage() {
 			return
 		}
 
-		done := uint32(pt.speedDone.Load())
-		if done > total {
-			done = total
-		}
+		done := min(uint32(pt.speedDone.Load()), total)
 
 		ProxyCount.Store(total)
 		Progress.Store(done)
@@ -331,12 +331,20 @@ func (pt *ProgressTracker) refreshStage() {
 			return
 		}
 
-		done := uint32(pt.mediaDone.Load())
-		if done > total {
-			done = total
-		}
+		done := min(uint32(pt.mediaDone.Load()), total)
 
 		ProxyCount.Store(total)
+		Progress.Store(done)
+	case -1: // 重命名阶段
+		CurrentStepName.Store("重命名")
+		base := Available.Load()
+		if base == 0 {
+			ProxyCount.Store(0)
+			Progress.Store(0)
+			return
+		}
+		done := min(uint32(pt.mediaDone.Load()), base)
+		ProxyCount.Store(base)
 		Progress.Store(done)
 	}
 
@@ -391,9 +399,6 @@ func (pc *ProxyChecker) renderProgressString() string {
 		percent = 100
 	}
 
-	barWidth := 40
-	barFilled := int(percent / 100 * float64(barWidth))
-
 	// ETA 后缀：-1=计算中, 0=完成/空闲不显示, >0=剩余时间
 	etaSuffix := ""
 	switch {
@@ -403,16 +408,27 @@ func (pc *ProxyChecker) renderProgressString() string {
 		etaSuffix = " ETA: \033[36m" + formatEta(etaSec) + "\033[0m"
 	}
 
-	return fmt.Sprintf("\r%s: [%-*s] %.1f%% (%d/%d) 可用: \033[32m%d\033[0m%s",
-		step,
-		barWidth,
-		strings.Repeat("=", barFilled)+">",
-		percent,
-		currentChecked,
-		total,
-		available,
-		etaSuffix,
-	)
+	barWidth := 40
+	barFilled := min(int(percent/100*float64(barWidth)), barWidth) // 先限制不超过 barWidth
+
+	bar := strings.Repeat("=", barFilled) + ">"
+	padding := max(barWidth - len(bar), 0)
+	bar += strings.Repeat(" ", padding)
+
+	return "\r" + step +
+		": [" + bar + "] " +
+		strconv.FormatFloat(percent, 'f', 1, 64) + "% " +
+		"(" + strconv.Itoa(currentChecked) + "/" + strconv.Itoa(total) + ") " +
+		"可用: \033[32m" + strconv.Itoa(int(available)) + "\033[0m" +
+		etaSuffix
+}
+
+// pad2 补零到两位数
+func pad2(n int64) string {
+	if n < 10 {
+		return "0" + strconv.FormatInt(n, 10)
+	}
+	return strconv.FormatInt(n, 10)
 }
 
 func formatEta(sec int64) string {
@@ -422,12 +438,16 @@ func formatEta(sec int64) string {
 	h := sec / 3600
 	m := (sec % 3600) / 60
 	s := sec % 60
+
 	switch {
 	case h > 0:
-		return fmt.Sprintf("%dh%02dm%02ds", h, m, s)
+		return strconv.FormatInt(h, 10) + "h" +
+			pad2(m) + "m" +
+			pad2(s) + "s"
 	case m > 0:
-		return fmt.Sprintf("%dm%02ds", m, s)
+		return strconv.FormatInt(m, 10) + "m" +
+			pad2(s) + "s"
 	default:
-		return fmt.Sprintf("%ds", s)
+		return strconv.FormatInt(s, 10) + "s"
 	}
 }
