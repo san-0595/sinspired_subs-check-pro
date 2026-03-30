@@ -945,7 +945,10 @@ import { initQuickPreview } from './cfg-quickpreview.js';
     if (els.progressBar) els.progressBar.value = pct
     if (els.progressText) els.progressText.textContent = `${processed}/${total}`
     if (els.progressPercentTitle) els.progressPercentTitle.textContent = stepName
-    if (els.progressPercent) els.progressPercent.textContent = pct.toFixed(1) + '%'
+    if (els.progressPercent) {
+      els.progressPercent.textContent = pct.toFixed(1) + '%'
+      els.progressPercent.style.display = processResults ? 'none' : ''
+    }
 
     if (els.successTitle) els.successTitle.textContent = '可用：'
     if (els.successText) {
