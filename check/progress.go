@@ -349,6 +349,18 @@ func (pt *ProgressTracker) refreshStage() {
 	// 处理停止信号下的显示文字
 	if ProcessResults.Load() {
 		CurrentStepName.Store("保存中")
+
+		total := uint32(pt.aliveDone.Load())
+		if total == 0 {
+			ProxyCount.Store(0)
+			Progress.Store(0)
+			return
+		}
+
+		done := min(uint32(pt.aliveDone.Load()), total)
+
+		ProxyCount.Store(total)
+		Progress.Store(done)
 	}
 }
 

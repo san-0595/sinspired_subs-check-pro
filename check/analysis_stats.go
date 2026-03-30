@@ -206,7 +206,7 @@ func saveDetailedAnalysis(global *AnalysisStats, subs map[string]*AnalysisStats,
 	sb.WriteString("  " + summary + "\n\n")
 
 	checkCount := Progress.Load()
-	if config.GlobalConfig.ProgressMode == "stage" {
+	if config.GlobalConfig.ProgressMode == "stage" || ForceClose.Load() || Successlimited.Load() {
 		checkCount = AliveCount.Load()
 	}
 
