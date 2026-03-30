@@ -3,7 +3,6 @@ package proxies
 import (
 	"encoding/base64"
 	"fmt"
-	"strings"
 )
 
 var (
@@ -33,17 +32,17 @@ func tryDecodeBase64(buf []byte) ([]byte, error) {
 	return dBuf[:n], nil
 }
 
-func urlSafe(data string) string {
-	return strings.NewReplacer("+", "-", "/", "_").Replace(data)
-}
+// func urlSafe(data string) string {
+// 	return strings.NewReplacer("+", "-", "/", "_").Replace(data)
+// }
 
-func decodeUrlSafe(data string) string {
-	dcBuf, err := base64.RawURLEncoding.DecodeString(data)
-	if err != nil {
-		return ""
-	}
-	return string(dcBuf)
-}
+// func decodeUrlSafe(data string) string {
+// 	dcBuf, err := base64.RawURLEncoding.DecodeString(data)
+// 	if err != nil {
+// 		return ""
+// 	}
+// 	return string(dcBuf)
+// }
 
 func TryDecodeBase64Mihomo(s string) (decoded []byte, err error) {
 	if len(s)%4 == 0 {

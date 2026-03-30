@@ -1,4 +1,4 @@
-// share_utils.go
+// Package app: share_utils.go
 package app
 
 import (

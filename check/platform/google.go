@@ -1,27 +1,25 @@
 package platform
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 )
 
-func CheckGoogle(httpClient *http.Client) (bool, error) {
-	if success, err := checkGoogleEndpoint(httpClient, "https://gstatic.com/generate_204", 204); err == nil && success {
-		return checkGoogleEndpoint(httpClient, "https://www.google.com/generate_204", 204)
+func CheckGoogle(httpClient *http.Client, ctx context.Context) (bool, error) {
+	if success, err := checkGoogleEndpoint(httpClient, ctx, "https://gstatic.com/generate_204", 204); err == nil && success {
+		return checkGoogleEndpoint(httpClient, ctx, "https://www.google.com/generate_204", 204)
 	}
 	return false, nil
 }
 
-func CheckGstatic(httpClient *http.Client) (bool, error) {
-	if success, err := checkGoogleEndpoint(httpClient, "https://gstatic.com/generate_204", 204); err == nil && success {
-		return true, nil
-	}
-	return false, nil
+func CheckGstatic(httpClient *http.Client, ctx context.Context) (bool, error) {
+	return checkGoogleEndpoint(httpClient, ctx, "https://gstatic.com/generate_204", 204)
 }
 
 // checkGoogleEndpoint 使用 HEAD 方法检查 URL 的状态码。
-func checkGoogleEndpoint(httpClient *http.Client, url string, statusCode int) (bool, error) {
-	req, err := http.NewRequest("HEAD", url, nil)
+func checkGoogleEndpoint(httpClient *http.Client, ctx context.Context, url string, statusCode int) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
 	if err != nil {
 		return false, err
 	}

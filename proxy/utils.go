@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -51,6 +52,20 @@ var (
 	v2rayRegexOnce         sync.Once
 	v2rayLinkRegexCompiled *regexp.Regexp
 )
+
+// ClearCache 检测结束后释放包级全局状态
+func ClearCache() {
+	uniqueSubsCount = 0
+
+	// 关闭所有复用 client 的连接池，释放 TLS session cache 和 idle conn
+	clientMapCache.Range(func(key, value any) bool {
+		if c, ok := value.(*http.Client); ok {
+			c.CloseIdleConnections()
+		}
+		clientMapCache.Delete(key)
+		return true
+	})
+}
 
 // --------核心解析入口--------
 

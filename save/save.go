@@ -312,9 +312,12 @@ func mergeMihomoTemplate(templateData []byte, proxies []map[string]any) ([]byte,
 	if err := yaml.Unmarshal(templateData, &merged); err != nil {
 		return nil, fmt.Errorf("解析 mihomo 覆写模板失败: %w", err)
 	}
+	templateData = nil //nolint:ineffassign
 	merged["proxies"] = proxies
-
-	return yaml.Marshal(merged)
+	result, err := yaml.Marshal(merged)
+	merged = nil //nolint:ineffassign
+	proxies = nil //nolint:ineffassign
+	return result, err
 }
 
 func fetchMihomoTemplate() ([]byte, error) {

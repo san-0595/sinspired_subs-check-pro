@@ -16,11 +16,13 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/metacubex/mihomo/component/resolver"
 	"github.com/robfig/cron/v3"
 	"github.com/sinspired/subs-check-pro/app/monitor"
 	"github.com/sinspired/subs-check-pro/assets"
 	"github.com/sinspired/subs-check-pro/check"
 	"github.com/sinspired/subs-check-pro/config"
+	proxyutils "github.com/sinspired/subs-check-pro/proxy"
 	"github.com/sinspired/subs-check-pro/save"
 	"github.com/sinspired/subs-check-pro/utils"
 )
@@ -336,7 +338,61 @@ func (app *App) checkProxies() error {
 	app.lastCheck.Total.Store(int64(check.ProxyCount.Load()))
 	app.lastCheck.available.Store(int64(len(results)))
 
+	// 切断所有大对象的应用
+	results = nil //nolint:ineffassign
+	proxyutils.ClearCache()
+	cleanupMihomo()
+
+	// 等待底层 xhttp/tcp goroutine 退出释放缓冲区
+	waitGoroutinesDrain(30 * time.Second)
+
+	// 连续触发两次 GC，彻底清空 go-yaml 等库的 sync.Pool
+	// 第一次 GC：将 sync.Pool 中的存活对象降级到 victim cache
+	runtime.GC()
+	// 第二次 GC：清空 victim cache，并强制将物理内存还给操作系统
+	debug.FreeOSMemory()
+
+	slog.Debug("当前 goroutine 数", "count", runtime.NumGoroutine())
+
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	slog.Debug("内存状态",
+		"HeapInuse", ms.HeapInuse/1024/1024,
+		"HeapReleased", ms.HeapReleased/1024/1024,
+		"Sys", ms.Sys/1024/1024)
 	return nil
+}
+
+// waitGoroutinesDrain 等待残留 goroutine 退出
+func waitGoroutinesDrain(timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	baseline := runtime.NumGoroutine()
+
+	// 预期正常闲置时的 goroutine 数量大约在 30-50 之间
+	for time.Now().Before(deadline) {
+		current := runtime.NumGoroutine()
+		if current <= baseline/2 || current < 50 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func cleanupMihomo() {
+	// 清除 Hosts 映射
+	if resolver.DefaultHostMapper != nil {
+		resolver.DefaultHostMapper = nil
+	}
+
+	// 动清理 DNS 解析器的内部缓存和长连接，并断开引用
+	if resolver.DefaultResolver != nil {
+		// 释放内部的 LRU/Map 缓存，断开大量的内存引用
+		resolver.DefaultResolver.ClearCache()
+		resolver.DefaultResolver.ResetConnection()
+		resolver.DefaultResolver = nil
+	}
+
+	resolver.ClearCache()
 }
 
 // TempLog 返回临时日志路径

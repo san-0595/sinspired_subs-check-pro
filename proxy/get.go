@@ -117,6 +117,9 @@ func logSubscriptionStats(total, local, remote, history int) {
 
 // GetProxies 主入口：获取、解析、去重及统计代理节点
 func GetProxies() ([]map[string]any, int, int, int, error) {
+	// 每次进入先清空上次的连接池
+	ClearCache()
+
 	// 初始化代理环境变量
 	initEnvironment()
 
@@ -149,8 +152,8 @@ func GetProxies() ([]map[string]any, int, int, int, error) {
 		nodeKeepLevels = make(map[string]int, 200000)
 	)
 
-	// GC 阈值，每20万个节点进行一次GC，避免内存无限上涨
-	const gcInterval = 200000
+	// GC 阈值，每10万个节点进行一次GC，避免内存无限上涨
+	const gcInterval = 100000
 	pendingGCNum := 0
 
 	// 处理获取节点，消费 proxyChan
@@ -244,9 +247,6 @@ func GetProxies() ([]map[string]any, int, int, int, error) {
 	close(proxyChan)
 	<-done
 
-	// 归还内存
-	debug.FreeOSMemory()
-
 	// 将 Map 转为 Slice，并统计最终的分类数量
 	finalProxies := make([]map[string]any, 0, len(uniqueNodes))
 	finalSuccCount := 0
@@ -270,10 +270,6 @@ func GetProxies() ([]map[string]any, int, int, int, error) {
 		finalProxies = append(finalProxies, map[string]any(node))
 	}
 
-	// 释放 Map 内存（虽然函数返回后也会释放）
-	uniqueNodes = nil
-	nodeKeepLevels = nil
-
 	// 打印去重统计日志
 	slog.Info("节点解析",
 		"原始", rawCount,
@@ -281,6 +277,14 @@ func GetProxies() ([]map[string]any, int, int, int, error) {
 		"丢弃", rawCount-len(finalProxies),
 	)
 	saveStats(SubStats)
+
+	// 释放 Map 内存（虽然函数返回后也会释放）
+	uniqueNodes = nil
+	nodeKeepLevels = nil
+
+	// 归还内存
+	debug.FreeOSMemory()
+
 	return finalProxies, rawCount, finalSuccCount, finalHistCount, nil
 }
 
@@ -301,6 +305,7 @@ func processSubscription(urlStr, tag string, wasSucced, wasHistory bool, out cha
 	if err != nil {
 		// 回退策略：尝试正则暴力提取
 		nodes = fallbackExtractV2Ray(data, urlStr)
+		data = nil //nolint:ineffassign
 		if len(nodes) == 0 {
 			if !hasDatePlaceholder(urlStr) {
 				slog.Warn("解析失败或为空列表", "URL", urlStr, "error", err)
@@ -308,6 +313,8 @@ func processSubscription(urlStr, tag string, wasSucced, wasHistory bool, out cha
 			return
 		}
 	}
+
+	data = nil //nolint:ineffassign
 
 	// 3. 过滤与发送
 	count := 0
@@ -540,7 +547,8 @@ func FetchSubsData(rawURL string) ([]byte, error) {
 			for _, strat := range strategies {
 				targetURL := strat.urlFunc(candidate)
 
-				key := fmt.Sprintf("%s|%v", targetURL, strat.useProxy)
+				key := targetURL + "|" + strconv.FormatBool(strat.useProxy)
+
 				if _, tried := triedInThisLoop[key]; tried {
 					continue
 				}

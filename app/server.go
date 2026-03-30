@@ -1,4 +1,4 @@
-// server.go
+// Package app: server.go
 package app
 
 import (

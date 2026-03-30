@@ -242,6 +242,10 @@ func Check() ([]Result, error) {
 	slog.Info(fmt.Sprintf("已获取节点数量: %d", rawCount))
 	slog.Info(fmt.Sprintf("去重后节点数量: %d", len(proxies)))
 
+	proxyutils.ClearCache()
+
+	debug.FreeOSMemory()
+
 	if subWasSuccedLength > 0 {
 		slog.Info(fmt.Sprintf("已加载上次检测可用节点，数量: %d", subWasSuccedLength))
 	}
@@ -277,7 +281,10 @@ func Check() ([]Result, error) {
 	}
 
 	checker := NewProxyChecker(len(proxies))
-	return checker.run(proxies)
+
+	results, err := checker.run(proxies)
+	checker = nil //nolint:ineffassign
+	return results, err
 }
 
 // Run 运行检测流程
@@ -475,6 +482,8 @@ func (pc *ProxyChecker) run(proxies []map[string]any) ([]Result, error) {
 		proxies[i] = nil
 	}
 
+	Bucket = nil //nolint:ineffassign
+
 	// 在保存上传之前直接归还内存
 	debug.FreeOSMemory()
 
@@ -582,7 +591,7 @@ func (pc *ProxyChecker) runAliveStage(ctx context.Context) {
 					continue
 				}
 				// 节点测活
-				isAlive := checkAlive(job)
+				isAlive := checkAlive(job, ctx)
 
 				if !isAlive {
 					// 记录非存活
@@ -799,8 +808,8 @@ func (pc *ProxyChecker) collectResults() {
 }
 
 // checkAlive 使用谷歌服务执行基本的存活检测。
-func checkAlive(job *ProxyJob) bool {
-	gstatic, err := platform.CheckGstatic(job.Client.Client)
+func checkAlive(job *ProxyJob, ctx context.Context) bool {
+	gstatic, err := platform.CheckGstatic(job.Client.Client, ctx)
 	if err == nil && gstatic {
 		return true
 	}
