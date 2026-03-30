@@ -427,37 +427,35 @@ func stripGhProxy(rawURL string) string {
 	return rawURL
 }
 
-// normalizeForCompare 用于比较前统一规范化：剥离代理前缀 + 去掉末尾 fragment（#...）
-// 因为 fragment 不影响实际请求内容，但可能因参数顺序不同导致误判
-func normalizeForCompare(rawURL string) string {
-	u := stripGhProxy(rawURL)
-	// fragment 部分（# 之后）不参与比较
-	if idx := strings.Index(u, "#"); idx >= 0 {
-		u = u[:idx]
-	}
-	return u
+// canonicalURL 剥离当前配置的 Github Proxy 前缀，再规范化为 raw.githubusercontent.com 直链。
+// 用于比对时忽略代理前缀差异。
+func canonicalURL(u string) string {
+	u = strings.TrimPrefix(u, config.GlobalConfig.GithubProxy)
+	return NormalizeGitHubRawURL(u)
 }
 
-// isSameScpOp 判断旧操作（任意来源）与新 SCP 操作是否实质相同：
-// type 一致，且规范化后的 content 和 mode 一致
-func isSameScpOp(raw json.RawMessage, newOp ScriptOperator) bool {
-	var existing struct {
-		Type string `json:"type"`
-		Args struct {
-			Content string `json:"content"`
-			Mode    string `json:"mode"`
-		} `json:"args"`
+func isSameScpOp(raw json.RawMessage, op ScriptOperator) bool {
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return false
 	}
-	if err := json.Unmarshal(raw, &existing); err != nil {
+	if t, _ := m["type"].(string); t != op.Type {
+		return false
+	}
+	args, _ := m["args"].(map[string]any)
+	if args == nil {
 		return false
 	}
 
-	newContent, _ := newOp.Args["content"].(string)
-	newMode, _ := newOp.Args["mode"].(string)
+	rawContent := canonicalURL(args["content"].(string))
+	newContent := canonicalURL(fmt.Sprint(op.Args["content"]))
+	if rawContent != newContent {
+		return false
+	}
 
-	return existing.Type == newOp.Type &&
-		existing.Args.Mode == newMode &&
-		normalizeForCompare(existing.Args.Content) == normalizeForCompare(newContent)
+	rawMode, _ := args["mode"].(string)
+	newMode := fmt.Sprint(op.Args["mode"])
+	return rawMode == newMode
 }
 
 // mergeFileProcess file 资源的差量合并：
