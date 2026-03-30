@@ -1431,6 +1431,7 @@
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
+
 .cfg-url-add {
   align-self: flex-start;
   padding: 4px 12px;
@@ -1450,6 +1451,26 @@
   color: var(--accent);
   border-color: var(--accent-light);
   background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.cfg-url-add-top {
+  align-self: flex-start;
+  padding: 2px 12px;
+  font-size: 10px;
+  font-family: inherit;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  margin-top: -6px;
+  margin-bottom: 2px;
+  margin-left: 18px;
+  opacity: 0.4;
+}
+.cfg-url-add-top:hover {
+  opacity: 1;
 }
 
 textarea.cfg-expandable-input {

@@ -1149,8 +1149,8 @@ function mkUrlList(field, values) {
     });
   });
 
-  const addBtn = el('button', { class: 'cfg-url-add', type: 'button', textContent: '+ 添加' });
-  wrap.appendChild(addBtn);
+  const addBtnTop = el('button', { class: 'cfg-url-add cfg-url-add-top', type: 'button', textContent: '↓ 插入' });
+  const addBtn = el('button', { class: 'cfg-url-add cfg-url-add-bottom', type: 'button', textContent: '+ 添加' });
 
   // ── 拖拽状态 ──────────────────────────────────────────────────────
   let _dragSrc = null;
@@ -1288,7 +1288,7 @@ function mkUrlList(field, values) {
   wrap.addEventListener('touchstart', _onTouchStart.bind(null, null), { passive: false });
 
   // ── 行构建 ────────────────────────────────────────────────────────
-  function addRow(val = '') {
+  function addRow(val = '', atTop = false) {
     const row = el('div', { class: 'cfg-url-item', draggable: 'true' });
 
     // 拖拽把手
@@ -1388,11 +1388,21 @@ function mkUrlList(field, values) {
       row.append(handle, inp, del);
     }
 
-    wrap.insertBefore(row, addBtn);
+    if (atTop) {
+      // 插到第一个 cfg-url-item 之前，没有则插到 addBtnTop 之后
+      const firstRow = wrap.querySelector('.cfg-url-item');
+      wrap.insertBefore(row, firstRow ?? addBtn);
+    } else {
+      wrap.insertBefore(row, addBtn);
+    }
   }
 
+  wrap.appendChild(addBtnTop);  // 顶部按钮最先
+  wrap.appendChild(addBtn);     // 底部按钮其次（行会 insertBefore 它）
+
+  addBtnTop.addEventListener('click', () => addRow('', true));
   addBtn.addEventListener('click', () => addRow());
-  list.forEach(v => addRow(v));
+  list.forEach(v => addRow(v));  // 初始行填充，仍然追加到底部按钮前
   return wrap;
 }
 

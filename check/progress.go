@@ -259,6 +259,7 @@ func (pt *ProgressTracker) refreshDynamic() {
 
 // refreshStage 修复后的分阶段算法：分母动态切换
 func (pt *ProgressTracker) refreshStage() {
+	// TODO: 仅测活模式，不应该有测速阶段，目前存在前端适配bug
 	stage := int(pt.currentStage.Load())
 
 	// 处理停止信号下的显示文字
