@@ -1,7 +1,6 @@
 package platform
 
 import (
-	"fmt"
 	"net/http"
 	"testing"
 )
@@ -44,7 +43,7 @@ func geminiTag(g GeminiStatus, nodeCountry string) string {
 			tag = "GM⁻"
 		}
 		if g.Region != nodeCountry {
-			tag = fmt.Sprintf("%s-%s", tag, g.Region)
+			tag = tag + "-" + g.Region
 		}
 		return tag
 	}

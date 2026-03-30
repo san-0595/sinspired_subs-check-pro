@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -50,7 +51,7 @@ func ConvertsV2RayExtra(buf []byte) ([]map[string]any, error) {
 				if profile := query.Get("profile"); profile != "" {
 					name = profile
 				} else {
-					name = fmt.Sprintf("%s:%s", urlMieru.Hostname(), query.Get("port"))
+					name = urlMieru.Hostname() + ":" + query.Get("port")
 				}
 			}
 			name = uniqueName(names, name)
@@ -108,7 +109,11 @@ func uniqueName(names map[string]int, name string) string {
 	if index, ok := names[name]; ok {
 		index++
 		names[name] = index
-		name = fmt.Sprintf("%s-%02d", name, index)
+		if index < 10 {
+			name = name + "-0" + strconv.Itoa(index)
+		} else {
+			name = name + "-" + strconv.Itoa(index)
+		}
 	} else {
 		index = 0
 		names[name] = index

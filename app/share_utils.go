@@ -3,11 +3,11 @@ package app
 
 import (
 	"crypto/subtle"
-	"fmt"
 	"html/template"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -101,7 +101,7 @@ func readDirFiles(dirPath string) []FileEntry {
 		}
 		files = append(files, FileEntry{
 			Name:    e.Name(),
-			Size:    fmt.Sprintf("%.1f KB", float64(info.Size())/1024),
+			Size: strconv.FormatFloat(float64(info.Size())/1024, 'f', 1, 64) + " KB",
 			ModTime: info.ModTime().Format("01-02 15:04"),
 		})
 	}

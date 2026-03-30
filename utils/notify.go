@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -164,6 +165,8 @@ func decorateURL(raw string, kind NotifyKind, downloadURL string) string {
 	switch kind {
 	case NotifyNewRelease:
 		q.Set("format", "markdown")
+	default:
+		q.Set("format", "text")
 	}
 
 	switch scheme {
@@ -272,11 +275,13 @@ func SendNotifyCheckResult(length int, checkTraffic string) {
 	title := config.GlobalConfig.NotifyTitle
 	var body string
 	if checkTraffic != "" {
-		body = fmt.Sprintf("✅ 可用节点：%d\n📊 消耗流量：%s\n🕒 %s",
-			length, checkTraffic, GetCurrentTime())
+		body = "✅ 可用节点：" + strconv.Itoa(length) +
+			"\n📊 消耗流量：" + checkTraffic +
+			"\n🕒 " + GetCurrentTime()
 	} else {
-		body = fmt.Sprintf("✅ 可用节点：%d\n⚠️ 网络异常或手动取消%s\n🕒 %s",
-			length, GetCurrentTime())
+		body = "✅ 可用节点：" + strconv.Itoa(length) +
+			"\n⚠️ 网络异常或手动取消" +
+			"\n🕒 " + GetCurrentTime()
 	}
 
 	broadcastNotify(NotifyNodeStatus, title, body, "")
@@ -285,14 +290,16 @@ func SendNotifyCheckResult(length int, checkTraffic string) {
 // SendNotifyGeoDBUpdate 发送 GeoDB 更新通知
 func SendNotifyGeoDBUpdate(version string) {
 	title := "🔔 MaxMind GeoDB 更新"
-	body := fmt.Sprintf("✅ 已更新到：%s\n🕒 %s", version, GetCurrentTime())
+	body := "✅ 已更新到：" + version + "\n🕒 " + GetCurrentTime()
+
 	broadcastNotify(NotifyGeoDBUpdate, title, body, "")
 }
 
 // SendNotifySelfUpdate 发送程序自更新通知
 func SendNotifySelfUpdate(current, latest string) {
 	title := "🔔 subs-check-pro 自动更新"
-	body := fmt.Sprintf("✅ %s -> %s\n🕒 %s", current, latest, GetCurrentTime())
+	body := "✅ " + current + " -> " + latest + "\n🕒 " + GetCurrentTime()
+
 	broadcastNotify(NotifySelfUpdate, title, body, "")
 }
 
@@ -300,12 +307,21 @@ func SendNotifySelfUpdate(current, latest string) {
 func SendNotifyDetectLatestRelease(current, latest string, isDocker, isGUI bool, downloadURL string) {
 	title := "📦 subs-check-pro 发现新版本"
 	var body string
-	if isDocker {
-		body = fmt.Sprintf("🏷 %s  \n🐳 Docker 镜像\n🔗 ghcr.io/sinspired/subs-check-pro:%s  \n🕒 %s", latest, latest, GetCurrentTime())
-	} else if isGUI {
-		body = fmt.Sprintf("🏷 %s  \n💻 GUI 内核 [下载](%s)  \n🕒 %s", latest, downloadURL, GetCurrentTime())
-	} else {
-		body = fmt.Sprintf("🏷 %s  \n💡 请开启自动更新或手动下载更新\n🔗 [下载链接](%s)  \n🕒 %s", latest, downloadURL, GetCurrentTime())
+
+	switch {
+	case isDocker:
+		body = "🏷 " + latest +
+			"\n🐳 Docker 镜像\n🔗 ghcr.io/sinspired/subs-check-pro:" + latest +
+			"\n🕒 " + GetCurrentTime()
+	case isGUI:
+		body = "🏷 " + latest +
+			"\n💻 GUI 内核 [下载](" + downloadURL + ")" +
+			"\n🕒 " + GetCurrentTime()
+	default:
+		body = "🏷 " + latest +
+			"\n💡 请开启自动更新或手动下载更新\n🔗 [下载链接](" + downloadURL + ")" +
+			"\n🕒 " + GetCurrentTime()
 	}
+
 	broadcastNotify(NotifyNewRelease, title, body, downloadURL)
 }

@@ -7,11 +7,12 @@ import (
 	"strings"
 
 	"github.com/metacubex/mihomo/common/convert"
+	"github.com/sinspired/subs-check-pro/utils"
 )
 
 func CheckIPRisk(httpClient *http.Client, ip string) (string, error) {
 	// TODO: 增加 "https://www.abuseipdb.com/check/${LOCAL_IP}"
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://scamalytics.com/ip/%s", ip), nil)
+	req, err := http.NewRequest("GET", utils.JoinURL("https://scamalytics.com/ip", ip), nil)
 	if err != nil {
 		return "", err
 	}
@@ -56,9 +57,10 @@ func CheckIPRisk(httpClient *http.Client, ip string) (string, error) {
 		}
 
 		if score != "" && rist != "" {
-			// return fmt.Sprintf("%s%% %s", score, rist), nil
-			return fmt.Sprintf("%s%%", score), nil
+			// return score + "%" + " " + rist, nil   // 如果要同时输出 rist
+			return score + "%", nil
 		}
+
 	}
 	return "", nil
 }

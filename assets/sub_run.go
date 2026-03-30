@@ -236,16 +236,16 @@ func startSubStore(ctx context.Context) error {
 		// host可以为空，port不能为空
 		if len(hostPort) == 2 && hostPort[1] != "" {
 			cmd.Env = append(os.Environ(),
-				fmt.Sprintf("SUB_STORE_BACKEND_API_HOST=%s", hostPort[0]),
-				fmt.Sprintf("SUB_STORE_BACKEND_API_PORT=%s", hostPort[1]),
+				"SUB_STORE_BACKEND_API_HOST="+hostPort[0],
+				"SUB_STORE_BACKEND_API_PORT="+hostPort[1],
 			)
 		} else if len(hostPort) == 1 {
-			cmd.Env = append(os.Environ(), fmt.Sprintf("SUB_STORE_BACKEND_API_PORT=%s", hostPort[0])) // 设置端口
+			cmd.Env = append(os.Environ(), "SUB_STORE_BACKEND_API_PORT="+normalizeSubstorePort(subStoreHost)) // 设置端口
 		} else {
 			return fmt.Errorf("sub-store-port invalid port format: %s", subStoreHost)
 		}
 	} else {
-		cmd.Env = append(os.Environ(), fmt.Sprintf("SUB_STORE_BACKEND_API_PORT=%s", normalizeSubstorePort(subStoreHost))) // 设置端口
+		cmd.Env = append(os.Environ(), "SUB_STORE_BACKEND_API_PORT="+normalizeSubstorePort(subStoreHost)) // 设置端口
 	}
 
 	// 如果MihomoOverwriteUrl包含本地IP，则移除所有代理环境变量
@@ -287,28 +287,28 @@ func startSubStore(ctx context.Context) error {
 	// TODO: 集成http-meta服务
 	// 设置后端path
 	cmd.Env = append(cmd.Env,
-		fmt.Sprintf("SUB_STORE_FRONTEND_BACKEND_PATH=%s", config.GlobalConfig.SubStorePath),
+		"SUB_STORE_FRONTEND_BACKEND_PATH="+config.GlobalConfig.SubStorePath,
 	)
 
 	// 集成sub-store前端并启用合并功能
 	cmd.Env = append(cmd.Env, "SUB_STORE_BACKEND_MERGE=true")
 	cmd.Env = append(cmd.Env,
-		fmt.Sprintf("SUB_STORE_FRONTEND_PATH=%s", paths.frontDir),
+		"SUB_STORE_FRONTEND_PATH="+paths.frontDir,
 	)
 
 	// sub-store 环境变量: 后端上传文件至 gist
 	if config.GlobalConfig.SubStoreSyncCron != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("SUB_STORE_BACKEND_SYNC_CRON=%s", config.GlobalConfig.SubStoreSyncCron))
+		cmd.Env = append(cmd.Env, "SUB_STORE_BACKEND_SYNC_CRON="+config.GlobalConfig.SubStoreSyncCron)
 	}
 
 	// sub-store 环境变量: 自动拉取订阅内容
 	if config.GlobalConfig.SubStoreProduceCron != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("SUB_STORE_PRODUCE_CRON=%s", config.GlobalConfig.SubStoreProduceCron))
+		cmd.Env = append(cmd.Env, "SUB_STORE_PRODUCE_CRON="+config.GlobalConfig.SubStoreProduceCron)
 	}
 
 	// sub-store 环境变量: 当遇到错误时发送通知
 	if config.GlobalConfig.SubStorePushService != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("SUB_STORE_PUSH_SERVICE=%s", config.GlobalConfig.SubStorePushService))
+		cmd.Env = append(cmd.Env, "SUB_STORE_PUSH_SERVICE="+config.GlobalConfig.SubStorePushService)
 	}
 
 	// 启动子进程并监听 ctx 取消以便优雅杀掉子进程

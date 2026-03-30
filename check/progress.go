@@ -257,11 +257,9 @@ func (pt *ProgressTracker) refreshDynamic() {
 		if mediaON {
 			pMedia = rMedia * progressWeight.media * rSpeed * rAlive
 		}
-	} else {
+	} else if mediaON {
 		// 没测速，媒体检测直接受限于测活
-		if mediaON {
-			pMedia = rMedia * progressWeight.media * rAlive
-		}
+		pMedia = rMedia * progressWeight.media * rAlive
 	}
 
 	finalPercent := pAlive + pSpeed + pMedia
@@ -412,7 +410,7 @@ func (pc *ProxyChecker) renderProgressString() string {
 	barFilled := min(int(percent/100*float64(barWidth)), barWidth) // 先限制不超过 barWidth
 
 	bar := strings.Repeat("=", barFilled) + ">"
-	padding := max(barWidth - len(bar), 0)
+	padding := max(barWidth-len(bar), 0)
 	bar += strings.Repeat(" ", padding)
 
 	return "\r" + step +

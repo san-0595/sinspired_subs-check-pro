@@ -3,13 +3,13 @@ package utils
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,12 +24,12 @@ var (
 )
 
 // IsLocalURL 判断给定的 URL 是否指向本地/局域网地址
-func IsLocalURL(URL string) bool {
+func IsLocalURL(urlStr string) bool {
 	// 解析 URL（支持 http://、https://、ws:// 等，也支持不带 scheme 的如 localhost:8080）
-	u, err := url.Parse(strings.ToLower(URL))
+	u, err := url.Parse(strings.ToLower(urlStr))
 	if err != nil {
 		// 如果解析失败，尝试加上 http:// 再试一次（兼容用户直接传 hostname:port）
-		if u2, err2 := url.Parse("http://" + URL); err2 == nil {
+		if u2, err2 := url.Parse("http://" + urlStr); err2 == nil {
 			u = u2
 		} else {
 			return false
@@ -38,7 +38,6 @@ func IsLocalURL(URL string) bool {
 
 	host := u.Hostname() // 自动提取主机名部分，去掉端口
 
-	// 处理常见本地标识
 	if host == "" ||
 		host == "localhost" ||
 		host == "127.0.0.1" ||
@@ -52,8 +51,6 @@ func IsLocalURL(URL string) bool {
 
 	ip := net.ParseIP(host)
 	if ip == nil {
-		// 无法解析为IP，但可能是内网域名如 my-router.home 等
-		// 可以选择进一步解析，但大多数情况直接返回 false 或保守视为非本地
 		return false
 	}
 
@@ -203,15 +200,16 @@ func GetGhProxy() bool {
 			config.GlobalConfig.GithubProxy = best.proxy
 			if best.cost.Milliseconds() < 1000 {
 				slog.Info("最佳GitHub代理", "URL", best.proxy,
-					"耗时", fmt.Sprintf("%dms", best.cost.Milliseconds()),
-					"速度", fmt.Sprintf("%.1fKB/s", best.speedKBps),
+					"耗时", strconv.FormatInt(best.cost.Milliseconds(), 10)+"ms",
+					"速度", strconv.FormatFloat(best.speedKBps, 'f', 1, 64)+"KB/s",
 				)
 			} else {
 				slog.Info("最佳GitHub代理", "URL", best.proxy,
-					"耗时", fmt.Sprintf("%.2fs", best.cost.Seconds()),
-					"速度", fmt.Sprintf("%.1fKB/s", best.speedKBps),
+					"耗时", strconv.FormatFloat(best.cost.Seconds(), 'f', 2, 64)+"s",
+					"速度", strconv.FormatFloat(best.speedKBps, 'f', 1, 64)+"KB/s",
 				)
 			}
+
 			IsGhProxyAvailable = true
 			return true
 		}
@@ -225,7 +223,7 @@ func GetGhProxy() bool {
 // checkGhProxyAvailable 检查指定的 githubproxy 是否可用，并返回处理后的地址和速度
 func checkGhProxyAvailable(githubProxy string) (bool, string, float64) {
 	if !strings.HasSuffix(githubProxy, "/") {
-		githubProxy = githubProxy + "/"
+		githubProxy += "/"
 	}
 	if !strings.HasPrefix(githubProxy, "http://") && !strings.HasPrefix(githubProxy, "https://") {
 		githubProxy = "https://" + githubProxy

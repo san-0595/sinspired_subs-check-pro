@@ -125,7 +125,13 @@ func (app *App) initHTTPServer() error {
 		}
 	}()
 
-	slog.Info("HTTP 服务器启动", "port", strings.TrimPrefix(listenAddr, ":"))
+	webUIURL := "http://localhost:" + strings.TrimPrefix(listenAddr, ":") + AdminPath
+
+	if config.GlobalConfig.EnableWebUI {
+		slog.Info("启用Web控制面板", "path", webUIURL, "api-key", config.GlobalConfig.APIKey)
+	} else {
+		slog.Info("HTTP 服务器启动", "port", strings.TrimPrefix(listenAddr, ":"))
+	}
 	return nil
 }
 
@@ -226,8 +232,6 @@ func (app *App) registerShareRoutes(router *gin.Engine, outputPath string) error
 
 // registerWebUIRoutes 注册WebUI路由
 func (app *App) registerWebUIRoutes(router *gin.Engine) {
-	slog.Info("启用Web控制面板", "path", "http://ip:port"+AdminPath, "api-key", config.GlobalConfig.APIKey)
-
 	router.GET(AdminPath, func(c *gin.Context) {
 		c.HTML(http.StatusOK, "admin.html", gin.H{
 			"configPath": app.configPath,
@@ -292,7 +296,7 @@ func normalizeListenAddr(s string) string {
 func (app *App) getConfig(c *gin.Context) {
 	configData, err := os.ReadFile(app.configPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("读取配置文件失败: %v", err)})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取配置文件失败" + err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -312,11 +316,11 @@ func (app *App) updateConfig(c *gin.Context) {
 	}
 	var yamlData map[string]any
 	if err := yaml.Unmarshal([]byte(req.Content), &yamlData); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("YAML格式错误: %v", err)})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "YAML格式错误: " + err.Error()})
 		return
 	}
 	if err := os.WriteFile(app.configPath, []byte(req.Content), 0o644); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("保存配置文件失败: %v", err)})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存配置文件失败" + err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "配置已更新"})
@@ -373,7 +377,7 @@ func (app *App) getLogs(c *gin.Context) {
 	}
 	lines, err := ReadLastNLines(logPath, MaxLogLines)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("读取日志失败: %v", err)})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取日志失败" + err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"logs": lines})

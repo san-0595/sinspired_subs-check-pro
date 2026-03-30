@@ -108,7 +108,7 @@ func (app *App) createDefaultConfig() error {
 		if !strings.HasSuffix(tpl, "\n") {
 			tpl += "\n"
 		}
-		tpl += fmt.Sprintf("sub-store-path: \"/%s\"\n", utils.GenerateRandomString(20))
+		tpl += "sub-store-path: \"/" + utils.GenerateRandomString(20) + "\"\n"
 		lines = strings.Split(tpl, "\n")
 	}
 
@@ -119,7 +119,7 @@ func (app *App) createDefaultConfig() error {
 	}
 
 	slog.Info("默认配置文件创建成功")
-	slog.Info(fmt.Sprintf("请编辑配置文件: %s", app.configPath))
+	slog.Info("请编辑配置文件", "路径", app.configPath)
 	os.Exit(0)
 	return nil
 }
@@ -165,7 +165,7 @@ func (app *App) initConfigWatcher() error {
 						oldSubStorePort := config.GlobalConfig.SubStorePort
 
 						if err := app.loadConfig(); err != nil {
-							slog.Error(fmt.Sprintf("重新加载配置文件失败: %v", err))
+							slog.Error("重新加载配置文件失败", "error", err)
 							return
 						}
 
@@ -281,7 +281,7 @@ func (app *App) initConfigWatcher() error {
 				if !ok {
 					return
 				}
-				slog.Error(fmt.Sprintf("配置文件监听错误: %v", err))
+				slog.Error("配置文件监听错误", "error", err)
 			}
 		}
 	}()
@@ -291,6 +291,6 @@ func (app *App) initConfigWatcher() error {
 		return fmt.Errorf("添加配置文件监听失败: %w", err)
 	}
 
-	slog.Info("配置文件监听已启动")
+	slog.Info("配置文件监听启动")
 	return nil
 }

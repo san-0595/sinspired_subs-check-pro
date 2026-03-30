@@ -146,10 +146,17 @@ func runGhProxyDetection(t *testing.T, proxies []string, listFile, detailFile st
 		w := csv.NewWriter(f)
 		defer w.Flush()
 		if header != nil {
-			w.Write(header)
+			if err := w.Write(header); err != nil {
+				slog.Error("写入 header 失败: " + err.Error())
+				return
+			}
 		}
+
 		for _, r := range allAvailable {
-			w.Write(rows(r))
+			if err := w.Write(rows(r)); err != nil {
+				slog.Error("写入 header 失败: " + err.Error())
+				return
+			}
 		}
 	}
 

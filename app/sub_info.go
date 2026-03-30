@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -91,20 +90,39 @@ func buildSubscriptionInfo() string {
 
 	var resetField string
 	if remaining < 24*time.Hour {
-		resetField = fmt.Sprintf("reset_hour=%d", next.Hour())
+		resetField = "reset_hour=" + strconv.Itoa(next.Hour())
 	} else {
 		resetDays := int(remaining.Hours() / 24)
-		resetField = fmt.Sprintf("reset_day=%d", resetDays)
+		resetField = "reset_day=" + strconv.Itoa(resetDays)
 	}
 
-	return fmt.Sprintf(
-		"upload=%d; download=%d; total=%d; expire=%d;"+
-			" %s; next_update=%s; last_update=%s;"+
-			" plan_name='%s'; app_url=%s",
-		upload, download, totalBytes, expireUnix,
-		resetField, nextUpdate, lastUpdate,
-		planName, appURL,
-	)
+	var b strings.Builder
+
+	writeKV(&b, "upload", strconv.FormatUint(upload, 10))
+	writeKV(&b, "download", strconv.FormatUint(download, 10))
+	writeKV(&b, "total", strconv.FormatInt(totalBytes, 10))
+	writeKV(&b, "expire", strconv.FormatInt(expireUnix, 10))
+
+	b.WriteString(resetField)
+	b.WriteString("; ")
+
+	writeKV(&b, "next_update", nextUpdate)
+	writeKV(&b, "last_update", lastUpdate)
+
+	b.WriteString("plan_name='")
+	b.WriteString(planName)
+	b.WriteString("'; ")
+
+	writeKV(&b, "app_url", appURL)
+
+	return b.String()
+}
+
+func writeKV(b *strings.Builder, key string, val string) {
+	b.WriteString(key)
+	b.WriteString("=")
+	b.WriteString(val)
+	b.WriteString("; ")
 }
 
 // calcNextResetTime 计算下次流量重置的绝对时间。

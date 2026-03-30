@@ -3,7 +3,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log/slog"
 	"os"
 
@@ -20,13 +19,14 @@ func main() {
 	flag.Parse()
 
 	// 初始化应用
-	application := app.New(Version, fmt.Sprintf("%s-%s", Version, CurrentCommit), *flagConfigPath)
+	fullVersion := Version + "-" + CurrentCommit
+	application := app.New(Version, fullVersion, *flagConfigPath)
 	// 版本更新成功通知
 	application.InitUpdateInfo()
-	slog.Info(fmt.Sprintf("当前版本: %s-%s", Version, CurrentCommit))
+	slog.Info("当前版本", "Version", fullVersion)
 
 	if err := application.Initialize(); err != nil {
-		slog.Error(fmt.Sprintf("初始化失败: %v", err))
+		slog.Error("初始化失败", "error", err)
 		os.Exit(1)
 	}
 

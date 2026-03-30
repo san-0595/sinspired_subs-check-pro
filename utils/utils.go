@@ -2,8 +2,8 @@ package utils
 
 import (
 	"crypto/rand"
-	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 
 	"github.com/sinspired/subs-check-pro/config"
@@ -75,15 +75,41 @@ func FormatTraffic(bytes uint64) string {
 
 	switch {
 	case bytes >= TB:
-		return fmt.Sprintf("%.2f TB", b/float64(TB))
+		return strconv.FormatFloat(b/float64(TB), 'f', 2, 64) + " TB"
 	case bytes >= GB:
-		return fmt.Sprintf("%.2f GB", b/float64(GB))
+		return strconv.FormatFloat(b/float64(GB), 'f', 2, 64) + " GB"
 	case bytes >= MB:
-		return fmt.Sprintf("%.2f MB", b/float64(MB))
+		return strconv.FormatFloat(b/float64(MB), 'f', 2, 64) + " MB"
 	case bytes >= KB:
-		return fmt.Sprintf("%.2f KB", b/float64(KB))
+		return strconv.FormatFloat(b/float64(KB), 'f', 2, 64) + " KB"
 	default:
-		return fmt.Sprintf("%d B", bytes)
+		return strconv.Itoa(int(bytes)) + " B"
 	}
 }
 
+// JoinURL 拼接多个 URL 片段，自动处理多余或缺失的斜杠。
+// 特性：
+//   - 不会破坏 scheme（例如 http:// 保留双斜杠）
+//   - 自动去除重复的 "/"，避免出现 "//" 或漏 "/" 的情况
+//   - 支持任意数量的路径片段
+//   - 空片段会被跳过
+//
+// 示例：
+//   JoinURL("http://example.com/", "/api/", "v1/", "/users")
+//   => "http://example.com/api/v1/users"
+func JoinURL(parts ...string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+
+	out := strings.TrimRight(parts[0], "/")
+
+	for _, p := range parts[1:] {
+		if p == "" {
+			continue
+		}
+		out += "/" + strings.Trim(p, "/")
+	}
+
+	return out
+}

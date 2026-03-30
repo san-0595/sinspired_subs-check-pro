@@ -6,7 +6,7 @@ import (
 	"github.com/sinspired/subs-check-pro/config"
 )
 
-var TestAPI = "https://apprise.xxxxx.xxxxx.org/notify"
+var TestAPI = "https://apprise.linkpc.dpdns.org/notify"
 var TestURLs = []string{
 	"ntfy://subs-check-pro",
 	// "bark://api.day.app/xxxxxxxxxxxxxxx",

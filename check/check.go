@@ -531,9 +531,8 @@ func (pc *ProxyChecker) distributeJobs(proxies []map[string]any, ctx context.Con
 				// 周期性强制归还内存
 				// 只有当索引达到阈值倍数时触发
 				if index > 0 && index%gcThreshold == 0 {
-					// 异步执行，尽量不阻塞分发，但在 CPU 极高时可能会有些许延迟
 					go func(currentIdx int64) {
-						slog.Debug(fmt.Sprintf("已处理 %d 个节点，正在执行主动内存回收...", currentIdx))
+						slog.Debug("已处理 " + strconv.FormatInt(currentIdx, 10) + " 个节点，正在执行主动内存回收...")
 						debug.FreeOSMemory()
 					}(index)
 				}
@@ -693,24 +692,29 @@ func (pc *ProxyChecker) runSpeedStage(ctx context.Context, cancel context.Cancel
 				if config.GlobalConfig.SuccessLimit > 0 && pc.available.Load() >= config.GlobalConfig.SuccessLimit {
 					stopOnce.Do(func() {
 						Successlimited.Store(true)
+						var msg string
 						if mediaON {
 							if speedON {
-								Successlimited.Store(true)
-								slog.Warn(fmt.Sprintf("达到成功节点数量限制 %d, 等待测速和媒体检测任务完成...", config.GlobalConfig.SuccessLimit))
+								msg = "达到成功节点数量限制 " +
+									strconv.Itoa(int(config.GlobalConfig.SuccessLimit)) +
+									", 等待测速和媒体检测任务完成..."
 							} else {
-								Successlimited.Store(true)
-								slog.Warn(fmt.Sprintf("达到成功节点数量限制 %d, 等待媒体检测任务完成...", config.GlobalConfig.SuccessLimit))
+								msg = "达到成功节点数量限制 " +
+									strconv.Itoa(int(config.GlobalConfig.SuccessLimit)) +
+									", 等待媒体检测任务完成..."
 							}
 						} else {
 							if speedON {
-								Successlimited.Store(true)
-								slog.Warn(fmt.Sprintf("达到成功节点数量限制 %d, 等待测速和节点重命名任务完成...", config.GlobalConfig.SuccessLimit))
+								msg = "达到成功节点数量限制 " +
+									strconv.Itoa(int(config.GlobalConfig.SuccessLimit)) +
+									", 等待测速和节点重命名任务完成..."
 							} else {
-								Successlimited.Store(true)
-								slog.Warn(fmt.Sprintf("达到成功节点数量限制 %d, 等待节点重命名任务完成...", config.GlobalConfig.SuccessLimit))
+								msg = "达到成功节点数量限制 " +
+									strconv.Itoa(int(config.GlobalConfig.SuccessLimit)) +
+									", 等待节点重命名任务完成..."
 							}
 						}
-
+						slog.Warn(msg)
 						cancel()
 					})
 				}

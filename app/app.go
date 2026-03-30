@@ -80,7 +80,7 @@ func (app *App) Initialize() error {
 
 	// 迁移旧配置文件
 	if err := app.migrateConfig(); err != nil {
-		slog.Warn(fmt.Sprintf("Singbox 配置迁移失败，跳过迁移继续加载: %v", err))
+		slog.Warn("Singbox 配置迁移失败，跳过迁移继续加载", "error", err)
 	}
 
 	// 加载配置文件
@@ -155,17 +155,17 @@ func (app *App) Initialize() error {
 		if !app.checking.Load() {
 			slog.Info("更新 GeoLite2 数据库...")
 			if err := assets.UpdateGeoLite2DB(); err != nil {
-				slog.Error(fmt.Sprintf("更新 GeoLite2 数据库失败: %v", err))
+				slog.Error("更新 GeoLite2 数据库失败", "error", err)
 			}
 		}
 	})
 	if err != nil {
-		slog.Error(fmt.Sprintf("注册 GeoLite2 数据库更新任务失败: %v", err))
+		slog.Error("注册 GeoLite2 数据库更新任务失败", "error", err)
 	} else {
 		weeklyCron.Start()
 	}
 
-	// 检查版本更新
+	// 检测版本更新
 	app.SetupUpdateTasks()
 
 	return nil
@@ -188,7 +188,11 @@ func (app *App) Run() {
 	app.setTimer()
 
 	if config.GlobalConfig.CronExpression != "" {
-		slog.Warn("使用cron表达式，首次启动不立即执行检测")
+		entries := app.cron.Entries()
+		if len(entries) > 0 {
+			nextTime := entries[0].Next
+			slog.Warn("激活 cron 检测任务", "time", nextTime.Format("2006-01-02 15:04:05"))
+		}
 	} else {
 		app.triggerCheck()
 	}
@@ -227,15 +231,21 @@ func (app *App) setTimer() {
 
 	// 检查是否设置了cron表达式
 	if config.GlobalConfig.CronExpression != "" {
-		slog.Info(fmt.Sprintf("使用cron表达式: %s", config.GlobalConfig.CronExpression))
+		slog.Info("设置 cron 定时计划", "cron", config.GlobalConfig.CronExpression)
 		app.cron = cron.New()
 		_, err := app.cron.AddFunc(config.GlobalConfig.CronExpression, func() {
 			app.triggerCheck()
 		})
 		if err != nil {
 			app.cron.Stop()
-			slog.Error(fmt.Sprintf("cron表达式 '%s' 解析失败: %v，将使用检查间隔时间",
-				config.GlobalConfig.CronExpression, err))
+			slog.Error(
+				"cron 表达式 '" +
+					config.GlobalConfig.CronExpression +
+					"' 解析失败: " +
+					err.Error() +
+					"，将使用检测间隔时间",
+			)
+
 			// 使用间隔时间
 			app.useIntervalTimer()
 		} else {
@@ -285,21 +295,21 @@ func (app *App) triggerCheck() {
 	defer app.checking.Store(false)
 
 	if err := app.checkProxies(); err != nil {
-		slog.Error(fmt.Sprintf("检测代理失败: %v", err))
+		slog.Error("检测代理失败", "error", err)
 	}
 
-	// 检测完成后显示下次检查时间
+	// 检测完成后显示下次检测时间
 	if app.ticker != nil {
 		// 使用间隔时间模式
 		app.ticker.Reset(time.Duration(app.interval) * time.Minute)
 		nextCheck := time.Now().Add(time.Duration(app.interval) * time.Minute)
-		slog.Info(fmt.Sprintf("下次检查时间: %s", nextCheck.Format("2006-01-02 15:04:05")))
+		slog.Info("下次检测时间", "time", nextCheck.Format("2006-01-02 15:04:05"))
 	} else if app.cron != nil {
 		// 使用cron模式
 		entries := app.cron.Entries()
 		if len(entries) > 0 {
 			nextTime := entries[0].Next
-			slog.Info(fmt.Sprintf("下次检查时间: %s", nextTime.Format("2006-01-02 15:04:05")))
+			slog.Info("下次检测时间", "time", nextTime.Format("2006-01-02 15:04:05"))
 		}
 	}
 	debug.FreeOSMemory()
@@ -477,7 +487,7 @@ func isDocker() bool {
 	return false
 }
 
-// SetupUpdateTasks 自动判断运行环境和配置，自动检查更新并创建定时任务
+// SetupUpdateTasks 自动判断运行环境和配置，自动检测更新并创建定时任务
 func (app *App) SetupUpdateTasks() {
 	enableSelfUpdate := config.GlobalConfig.EnableSelfUpdate
 	updateOnStartup := config.GlobalConfig.UpdateOnStartup
@@ -503,7 +513,7 @@ func (app *App) SetupUpdateTasks() {
 		go func() {
 			_, _, err := app.detectLatestRelease()
 			if err != nil {
-				slog.Warn("检查更新错误", "error", err)
+				slog.Warn("检测更新错误", "error", err)
 			}
 			close(detectDone)
 		}()
@@ -521,12 +531,12 @@ func (app *App) SetupUpdateTasks() {
 	if enableSelfUpdate {
 		slog.Debug("程序将定时更新并重启", "schedule", schedule)
 	} else {
-		slog.Debug("程序将定时检查新版本(不自动更新)", "schedule", schedule)
+		slog.Debug("程序将定时检测新版本(不自动更新)", "schedule", schedule)
 	}
 	_, err := updateCron.AddFunc(schedule, func() {
 		if !app.checking.Load() {
 			if !StartFromGUI && enableSelfUpdate && !isDocker {
-				slog.Debug("定时检查版本更新并自动升级...")
+				slog.Debug("定时检测版本更新并自动升级...")
 				updateDone := make(chan struct{})
 				go func() {
 					app.CheckUpdateAndRestart(true) // 定时任务使用 true
@@ -534,12 +544,12 @@ func (app *App) SetupUpdateTasks() {
 				}()
 				<-updateDone
 			} else {
-				slog.Debug("定时检查新版本...")
+				slog.Debug("定时检测新版本...")
 				detectDone := make(chan struct{})
 				go func() {
 					_, _, err := app.detectLatestRelease()
 					if err != nil {
-						slog.Warn("检查更新错误", "error", err)
+						slog.Warn("检测更新错误", "error", err)
 					}
 					close(detectDone)
 				}()
@@ -548,7 +558,7 @@ func (app *App) SetupUpdateTasks() {
 		}
 	})
 	if err != nil {
-		slog.Error(fmt.Sprintf("注册 定时检查版本更新 定时任务失败: %v", err))
+		slog.Error("注册 定时检测版本更新 定时任务失败", "error", err)
 	} else {
 		updateCron.Start()
 	}

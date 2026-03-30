@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -114,9 +115,9 @@ var (
 	LatestSingboxVersion = "1.12"
 	OldSingboxVersion    = "1.11"
 	IsGithubProxy        bool
-	BaseURL              string       //基础api地址
+	BaseURL              string       // 基础api地址
 	SubUserInfoURL       string       // SubUserInfoURL 订阅流量信息 URL
-	operatorCounter      atomic.Int64 //脚本操作元素ID计数
+	operatorCounter      atomic.Int64 // 脚本操作元素ID计数
 )
 
 // ID 生成
@@ -125,7 +126,19 @@ var (
 func newOperatorID() string {
 	sec := time.Now().Unix() % 100_000_000
 	seq := operatorCounter.Add(1) % 100_000_000
-	return fmt.Sprintf("%s%d.%08d", scpIDPrefix, sec, seq)
+
+	return scpIDPrefix +
+		strconv.FormatInt(sec, 10) +
+		"." +
+		pad8(int(seq))
+}
+
+func pad8(n int) string {
+	s := strconv.Itoa(n)
+	for len(s) < 8 {
+		s = "0" + s
+	}
+	return s
 }
 
 // 操作识别工具
@@ -593,7 +606,7 @@ func newSingboxFile(name, jsURL, jsonURL string) file {
 	version := strings.Split(name, "-")[1]
 	remark := "默认 Sing-Box 订阅 (带分流规则)"
 	if version != "" {
-		remark = fmt.Sprintf("默认 Sing-Box-%s 订阅 (带分流规则)", version)
+		remark = "默认 Sing-Box-" + version + " 订阅 (带分流规则)"
 	}
 
 	// icon := "https://singbox.app/wp-content/uploads/2025/06/cropped-logo-278x300.webp"
@@ -632,7 +645,8 @@ func newSingboxFile(name, jsURL, jsonURL string) file {
 
 // fetchProcess 获取指定资源的现有 process 列表（保留原始 JSON 用于差量合并）
 func fetchProcess(endpoint, name string) ([]json.RawMessage, error) {
-	resp, err := http.Get(fmt.Sprintf("%s/api/%s/%s", BaseURL, endpoint, name))
+	resp, err := http.Get(JoinURL(BaseURL, "api", endpoint, name))
+
 	if err != nil {
 		return nil, err
 	}
@@ -770,7 +784,7 @@ func (f file) updateSubStoreFile() error {
 		if err := createResource(endpoint, f, f.Name); err != nil {
 			return fmt.Errorf("创建 %s 失败: %w", f.Name, err)
 		}
-		slog.Info(fmt.Sprintf("%s 订阅已创建", f.Name))
+		slog.Info("sub-store 订阅已创建", "name", f.Name)
 		return nil
 	}
 
@@ -784,7 +798,7 @@ func (f file) updateSubStoreFile() error {
 	if err := updateResource(endpoint, f, f.Name); err != nil {
 		return fmt.Errorf("更新 %s 失败: %w", f.Name, err)
 	}
-	slog.Info(fmt.Sprintf("%s 订阅已更新", f.Name))
+	slog.Info("sub-store 订阅已更新", "name", f.Name)
 	return nil
 }
 
@@ -821,14 +835,18 @@ func UpdateSubStore(yamlData []byte) {
 	// --- sub ---
 	defaultSub := newDefaultSub(yamlData)
 	if err := updateSub(defaultSub); err != nil {
-		slog.Error(fmt.Sprintf("更新 %s 失败: %v", defaultSub.Name, err))
+		slog.Error("更新订阅失败",
+			"name", defaultSub.Name,
+			"error", err,
+		)
 		return
 	}
-	slog.Info(fmt.Sprintf("%s 订阅已更新", defaultSub.Name))
+
+	slog.Info("sub-store 订阅已更新", "name", defaultSub.Name)
 
 	// --- mihomo ---
 	if err := newMihomoFile().updateSubStoreFile(); err != nil {
-		slog.Warn(fmt.Sprintf("mihomo 订阅更新失败: %v", err))
+		slog.Warn("mihomo 订阅更新失败", "error", err)
 	}
 
 	// --- singbox ---
@@ -841,7 +859,7 @@ func UpdateSubStore(yamlData []byte) {
 	processSingboxFile(&config.GlobalConfig.SingboxLatest, latestSingboxJS, latestSingboxJSON, LatestSingboxVersion)
 	processSingboxFile(&config.GlobalConfig.SingboxOld, OldSingboxJS, OldSingboxJSON, OldSingboxVersion)
 
-	slog.Info("substore 更新完成")
+	slog.Info("sub-store 更新完成")
 }
 
 func processSingboxFile(sbc *config.SingBoxConfig, defaultJS, defaultJSON, version string) {
@@ -852,7 +870,7 @@ func processSingboxFile(sbc *config.SingBoxConfig, defaultJS, defaultJSON, versi
 	}
 	f := newSingboxFile(SingboxName+"-"+version, js, jsonStr)
 	if err := f.updateSubStoreFile(); err != nil {
-		slog.Warn(fmt.Sprintf("%s 订阅更新失败: %v", f.Name, err))
+		slog.Warn("sub-store 订阅更新失败", "name", f.Name, "error", err)
 	}
 }
 

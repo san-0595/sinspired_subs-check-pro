@@ -297,7 +297,7 @@ func (app *App) CheckUpdateAndRestart(silentUpdate bool) {
 		return
 	}
 
-	checksumFile := fmt.Sprintf("subs-check-pro_%s_checksums.txt", latest.Version())
+	checksumFile := "subs-check-pro_" + latest.Version() + "_checksums.txt"
 
 	// 更新前检测系统代理环境
 	isSysProxy = utils.GetSysProxy()

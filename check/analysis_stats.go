@@ -198,7 +198,7 @@ func (pc *ProxyChecker) GenerateAnalysisReport() {
 func saveDetailedAnalysis(global *AnalysisStats, subs map[string]*AnalysisStats, sortedURLs []string) {
 	var sb strings.Builder
 	sb.WriteString("# 检测结果分析报告\n")
-	sb.WriteString(fmt.Sprintf("# 生成时间: %s\n\n", time.Now().Format(time.DateTime)))
+	sb.WriteString("# 生成时间: " + time.Now().Format(time.DateTime) + "\n\n")
 
 	// 1. 总结性文案 (用于快速预览)
 	sb.WriteString("summary: |\n")
@@ -223,7 +223,7 @@ func saveDetailedAnalysis(global *AnalysisStats, subs map[string]*AnalysisStats,
 
 	var speedText string
 	if speedON {
-		speedText = fmt.Sprintf("%d", config.GlobalConfig.MinSpeed)
+		speedText = strconv.Itoa(config.GlobalConfig.MinSpeed)
 	} else {
 		speedText = "0"
 	}
@@ -233,12 +233,14 @@ func saveDetailedAnalysis(global *AnalysisStats, subs map[string]*AnalysisStats,
 
 	// 2. 全局统计 (可视化友好结构)
 	sb.WriteString("global_analysis:\n")
-	sb.WriteString(fmt.Sprintf("  alive_count: %d\n", global.Total))
+	sb.WriteString("  alive_count: " + strconv.Itoa(global.Total) + "\n")
 	sb.WriteString("  geography_distribution:" + formatMap(global.Countries, "    ") + "\n")
 	sb.WriteString("  protocol_distribution:" + formatMap(global.Types, "    ") + "\n")
 
 	sb.WriteString("  quality_metrics:\n")
-	sb.WriteString(fmt.Sprintf("    cf_consistent_ratio: %.1f%%\n", float64(getSum(global.CFCon))/float64(max(1, global.Total))*100))
+	ratio := float64(getSum(global.CFCon)) / float64(max(1, global.Total)) * 100
+	sb.WriteString("    cf_consistent_ratio: " + strconv.FormatFloat(ratio, 'f', 1, 64) + "%\n")
+
 	sb.WriteString("    cf_details:\n")
 	sb.WriteString("      consistent_¹⁺:" + formatMap(global.CFCon, "        ") + "\n")
 	sb.WriteString("      inconsistent_⁰:" + formatMap(global.CFIncon, "        ") + "\n")
@@ -256,13 +258,13 @@ func saveDetailedAnalysis(global *AnalysisStats, subs map[string]*AnalysisStats,
 		rate := float64(pStat.Success) / float64(max(1, pStat.Total))
 
 		if st != nil {
-			sb.WriteString(fmt.Sprintf("  - url: %s\n", u))
-			sb.WriteString(fmt.Sprintf("    stats: { rate: %.4f%%, success: %d, total: %d }\n", rate*100, pStat.Success, pStat.Total))
-			sb.WriteString(fmt.Sprintf("    protocols: { %s }\n", formatMapToInline(st.Types)))
-			sb.WriteString(fmt.Sprintf("    top_locations: [%s]\n", getTopKeys(st.Countries, 3)))
+			sb.WriteString("  - url: " + u + "\n")
+			sb.WriteString("    stats: { rate: " + strconv.FormatFloat(rate*100, 'f', 4, 64) + "%, success: " + strconv.Itoa(pStat.Success) + ", total: " + strconv.Itoa(pStat.Total) + " }\n")
+			sb.WriteString("    protocols: { " + formatMapToInline(st.Types) + " }\n")
+			sb.WriteString("    top_locations: [" + getTopKeys(st.Countries, 3) + "]\n")
 		} else {
-			sbBad.WriteString(fmt.Sprintf("  - url: %s\n", u))
-			sbBad.WriteString(fmt.Sprintf("    stats: { rate: %.4f%%, success: %d, total: %d }\n", rate*100, pStat.Success, pStat.Total))
+			sbBad.WriteString("  - url: " + u + "\n")
+			sbBad.WriteString("    stats: { rate: " + strconv.FormatFloat(rate*100, 'f', 4, 64) + "%, success: " + strconv.Itoa(pStat.Success) + ", total: " + strconv.Itoa(pStat.Total) + " }\n")
 		}
 	}
 
@@ -296,25 +298,19 @@ func generateSummary(s *AnalysisStats) string {
 
 	var speedText string
 	if speedON {
-		speedText = fmt.Sprintf("，设置速度下限 %d KB/s", config.GlobalConfig.MinSpeed)
+		speedText = "，设置速度下限 " + strconv.Itoa(config.GlobalConfig.MinSpeed) + " KB/s"
 	} else {
 		speedText = "，未开启下载测速"
 	}
 
-	return fmt.Sprintf(
-		"用时 %s,消耗流量 %s, 检测到 %s 个可用节点%s。"+
-			"覆盖 %d 个国家/地区 [Top: %s]; "+
-			"%s [CF 中转 %.1f%%, VPS %.1f%%]; "+
-			"流媒体解锁: [%s]; AI 解锁[%s]; "+
-			"代理协议: %s。",
-		prettyDuration(CheckDuration),
-		CheckTraffic,
-		prettyTotal(s.Total),
-		speedText, len(s.Countries), topCountry,
-		lineFeature, cfRatio, vpsRatio,
-		topMedia, topAI,
-		getTopKeys(s.Types, 10),
-	)
+	return "用时 " + prettyDuration(CheckDuration) +
+		",消耗流量 " + CheckTraffic +
+		", 检测到 " + prettyTotal(s.Total) + " 个可用节点" + speedText + "。" +
+		"覆盖 " + strconv.Itoa(len(s.Countries)) + " 个国家/地区 [Top: " + topCountry + "]; " +
+		lineFeature + " [CF 中转 " + strconv.FormatFloat(cfRatio, 'f', 1, 64) +
+		"%, VPS " + strconv.FormatFloat(vpsRatio, 'f', 1, 64) + "%]; " +
+		"流媒体解锁: [" + topMedia + "]; AI 解锁[" + topAI + "]; " +
+		"代理协议: " + getTopKeys(s.Types, 10) + "。"
 }
 
 // logSummary 终端结构化输出
@@ -329,13 +325,12 @@ func logSummary(s *AnalysisStats) {
 
 	slog.Info("检测摘要",
 		"耗时", prettyDuration(CheckDuration),
-		"CF", fmt.Sprintf("%.0f%%", cfRatio),
-		"VPS", fmt.Sprintf("%.0f%%", vpsRatio),
+		"CF", strconv.FormatFloat(cfRatio, 'f', 0, 64)+"%",
+		"VPS", strconv.FormatFloat(vpsRatio, 'f', 0, 64)+"%",
 		// "媒体解锁", getTopFiltered(s.Media, []string{"Netflix", "YouTube", "Disney+", "TikTok"}, 5),
 		// "AI解锁", getTopFiltered(s.Media, []string{"GPT", "GPT+", "Gemini"}, 3),
 		"协议", getTopKeys(s.Types, 10),
 	)
-
 }
 
 // 工具函数
@@ -345,23 +340,29 @@ func prettyTime(t time.Time) string {
 	}
 	return t.Format("01-02 15:04") // 月-日 时:分
 }
+
 func prettyDuration(d time.Duration) string {
 	sec := int(d.Seconds())
-	if sec >= 3600 {
-		return fmt.Sprintf("%d 分", sec/60) // 超过 60 分钟只显示分钟
-	} else if sec >= 60 {
-		return fmt.Sprintf("%d 分 %d 秒", sec/60, sec%60)
-	} else {
-		return fmt.Sprintf("%d 秒", sec)
+	switch {
+	case sec >= 3600:
+		// 超过 60 分钟只显示分钟
+		return strconv.Itoa(sec/60) + "分"
+	case sec >= 60:
+		return strconv.Itoa(sec/60) + "分 " + strconv.Itoa(sec%60) + "秒"
+	default:
+		return strconv.Itoa(sec) + "秒"
 	}
 }
+
 func prettyTotal(n int) string {
-	if n >= 1000000 {
-		return fmt.Sprintf("%d万", n/10000)
-	} else if n >= 10000 {
-		return fmt.Sprintf("%.1f万", float64(n)/10000.0)
+	switch {
+	case n >= 1000000:
+		return strconv.Itoa(n/10000) + "万"
+	case n >= 10000:
+		return strconv.FormatFloat(float64(n)/10000.0, 'f', 1, 64) + "万"
+	default:
+		return strconv.Itoa(n)
 	}
-	return fmt.Sprintf("%d", n)
 }
 
 // getTopFiltered 根据白名单过滤并返回前 N 个统计项
@@ -387,8 +388,11 @@ func getTopFiltered(m map[string]int, filter []string, limit int) string {
 
 	var parts []string
 	for i := 0; i < len(filtered) && i < limit; i++ {
-		parts = append(parts, fmt.Sprintf("%s:%d", filtered[i].K, filtered[i].V))
+		parts = append(parts,
+			filtered[i].K+":"+strconv.Itoa(filtered[i].V),
+		)
 	}
+
 	if len(parts) == 0 {
 		return "无"
 	}
@@ -411,7 +415,7 @@ func formatMap(m map[string]int, indent string) string {
 	var out strings.Builder
 	out.WriteString("\n")
 	for _, item := range res {
-		out.WriteString(fmt.Sprintf("%s%s: %d\n", indent, item.K, item.V))
+		fmt.Fprintf(&out, "%s%s: %d\n", indent, item.K, item.V)
 	}
 	return strings.TrimRight(out.String(), "\n")
 }
@@ -434,8 +438,9 @@ func formatMapToInline(m map[string]int) string {
 
 	var parts []string
 	for _, item := range res {
-		parts = append(parts, fmt.Sprintf("%s: %d", item.K, item.V))
+		parts = append(parts, item.K+": "+strconv.Itoa(item.V))
 	}
+
 	return strings.Join(parts, ", ")
 }
 
@@ -497,25 +502,28 @@ func checkSubsSuccessRate(subs map[string]*AnalysisStats, sortedURLs []string) {
 
 			var protoParts []string
 			for _, p := range protos {
-				protoParts = append(protoParts, fmt.Sprintf("%s: %d", p.k, p.v))
+				protoParts = append(protoParts, p.k+": "+strconv.Itoa(p.v))
+
 			}
 			protoStr = "[" + strings.Join(protoParts, "; ") + "]"
 		}
 
 		// 格式化行：- URL # 46.667% (7/15) ; vless: 8
-		line := fmt.Sprintf("  - %s # %.4f%% (%d/%d)%s\n", u, rate*100, pStat.Success, pStat.Total, protoStr)
+		line := "  - " + u + " # " + strconv.FormatFloat(rate*100, 'f', 4, 64) + "% (" + strconv.Itoa(pStat.Success) + "/" + strconv.Itoa(pStat.Total) + ")" + protoStr + "\n"
 
 		// 分类逻辑
-		if pStat.Success == 0 {
+		switch {
+		case pStat.Success == 0:
 			zeroPart.WriteString(line)
-		} else if rate < threshold {
-			// 仅当确实有节点存活但不足阈值时才打印 Warn，完全死掉的只记录不刷屏
-			if pStat.Success > 0 {
-				slog.Warn(fmt.Sprintf("订阅成功率过低: %s", u),
-					"Rate", fmt.Sprintf("%.1f%%", rate*100), "Count", fmt.Sprintf("%d/%d", pStat.Success, pStat.Total))
-			}
+
+		case rate < threshold:
+			slog.Warn("订阅成功率过低: "+u,
+				"Rate", strconv.FormatFloat(rate*100, 'f', 1, 64)+"%",
+				"Count", strconv.Itoa(pStat.Success)+"/"+strconv.Itoa(pStat.Total),
+			)
 			lowPart.WriteString(line)
-		} else {
+
+		default:
 			goodPart.WriteString(line)
 		}
 	}
@@ -523,15 +531,15 @@ func checkSubsSuccessRate(subs map[string]*AnalysisStats, sortedURLs []string) {
 	// 2. 组装最终 YAML 内容
 	var finalSB strings.Builder
 	finalSB.WriteString("# 订阅质量统计报告\n")
-	finalSB.WriteString(fmt.Sprintf("# 生成时间: %s\n\n", time.Now().Format(time.DateTime)))
+	finalSB.WriteString("# 生成时间: " + time.Now().Format(time.DateTime) + "\n\n")
 
 	if goodPart.Len() > 0 {
-		finalSB.WriteString(fmt.Sprintf("# 达标订阅列表 (>=%.0f%%)\nsub-urls:\n", threshold*100))
+		finalSB.WriteString("# 达标订阅列表 (>=" + strconv.FormatFloat(threshold*100, 'f', 2, 64) + "%)\nsub-urls:\n")
 		finalSB.WriteString(goodPart.String() + "\n")
 	}
 
 	if lowPart.Len() > 0 {
-		finalSB.WriteString(fmt.Sprintf("# 未达标订阅列表 (<%.0f%%)\nsub-urls-low:\n", threshold*100))
+		finalSB.WriteString("# 未达标订阅列表 (<" + strconv.FormatFloat(threshold*100, 'f', 2, 64) + "%)\nsub-urls-low:\n")
 		finalSB.WriteString(lowPart.String() + "\n")
 	}
 

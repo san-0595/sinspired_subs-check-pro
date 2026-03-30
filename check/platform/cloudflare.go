@@ -3,7 +3,6 @@ package platform
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"math/rand/v2"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/metacubex/mihomo/common/convert"
 	"github.com/sinspired/subs-check-pro/config"
+	"github.com/sinspired/subs-check-pro/utils"
 )
 
 var CfCdnApis = []string{
@@ -152,7 +152,8 @@ func FetchCFTraceFirstConcurrent(httpClient *http.Client, ctx context.Context, c
 
 // FetchCFTrace 从cloudflare 的cdn-cgi/trace API获取CDN节点位置
 func FetchCFTrace(httpClient *http.Client, ctx context.Context, baseURL string) (string, string) {
-	url := fmt.Sprintf("%s/cdn-cgi/trace", baseURL)
+	url := utils.JoinURL(baseURL, "cdn-cgi/trace")
+
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", ""

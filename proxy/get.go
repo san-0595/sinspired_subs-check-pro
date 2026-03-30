@@ -110,9 +110,10 @@ func logSubscriptionStats(total, local, remote, history int) {
 	slog.Info("订阅数量", args...)
 
 	if len(config.GlobalConfig.NodeType) > 0 {
-		val := fmt.Sprintf("[%s]", strings.Join(config.GlobalConfig.NodeType, ","))
+		val := "[" + strings.Join(config.GlobalConfig.NodeType, ",") + "]"
 		slog.Info("代理协议筛选", slog.String("Type", val))
 	}
+
 }
 
 // GetProxies 主入口：获取、解析、去重及统计代理节点
@@ -720,8 +721,8 @@ func resolveSubUrls() ([]string, int, int, int) {
 	}
 
 	requiredListenPort := strings.TrimSpace(strings.TrimPrefix(config.GlobalConfig.ListenPort, ":"))
-	localLastSucced := fmt.Sprintf("http://127.0.0.1:%s/all.yaml", requiredListenPort)
-	localHistory := fmt.Sprintf("http://127.0.0.1:%s/history.yaml", requiredListenPort)
+	localLastSucced := "http://127.0.0.1:" + requiredListenPort + "/all.yaml"
+	localHistory := "http://127.0.0.1:" + requiredListenPort + "/history.yaml"
 
 	// 如果用户设置了保留成功节点，则把本地的 all.yaml 和 history.yaml 放到最前面
 	if config.GlobalConfig.KeepSuccessProxies {
@@ -1013,8 +1014,9 @@ func logFatal(err error, urlStr string) {
 		}
 		// 对失效订阅加上删除线效果
 		if code == 404 || code == 401 || code == 410 {
-			urlStr = fmt.Sprintf("\033[9m%s\033[29m", urlStr)
+			urlStr = "\033[9m" + urlStr + "\033[29m"
 		}
+
 		slog.Error(msg, "URL", urlStr, "status", code)
 
 	} else {

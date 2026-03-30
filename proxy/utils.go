@@ -388,7 +388,7 @@ func checkBool(m map[string]any, key string) {
 		m[key] = v != 0
 	default:
 		// 其他情况尝试转 string
-		s := fmt.Sprintf("%v", v)
+		s := toString(v)
 		if s == "true" || s == "1" {
 			m[key] = true
 		} else {
@@ -447,7 +447,7 @@ func ToIntPort(v any) int {
 		return int(val)
 	default:
 		// 最后的兜底，极少进入
-		s := fmt.Sprintf("%v", v)
+		s := toString(v)
 		if i, err := strconv.Atoi(s); err == nil {
 			return i
 		}
@@ -769,7 +769,7 @@ func ConvertGeneralJSONArray(list []any) []ProxyNode {
 				if name, ok := m["remarks"].(string); ok && name != "" {
 					node["name"] = name
 				} else {
-					node["name"] = fmt.Sprintf("ss-%s:%v", m["server"], m["server_port"])
+					node["name"] = "ss-" + m["server"].(string) + ":" + strconv.Itoa(m["server_port"].(int))
 				}
 
 				NormalizeNode(node)
@@ -871,7 +871,7 @@ func ParseSSRURI(link string) map[string]any {
 	}
 	// 默认名称
 	if node["name"] == nil || node["name"] == "" {
-		node["name"] = fmt.Sprintf("ssr-%v", node["server"])
+		node["name"] = "ssr-" + toString(node["server"])
 	}
 	return node
 }
@@ -1361,4 +1361,24 @@ func migrateOldFiles(srcDir, fileName, targetDir string) error {
 		return fmt.Errorf("写入目标文件失败: %w", err)
 	}
 	return nil
+}
+
+func toString(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case int:
+		return strconv.Itoa(val)
+	case int64:
+		return strconv.FormatInt(val, 10)
+	case float64:
+		return strconv.FormatFloat(val, 'f', -1, 64)
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	default:
+		return ""
+	}
 }

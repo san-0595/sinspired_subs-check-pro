@@ -1,9 +1,9 @@
 package proxies
 
 import (
-	"fmt"
 	"math/rand/v2"
 	"net"
+	"strconv"
 )
 
 type ShuffleConfig struct {
@@ -211,6 +211,6 @@ func ThresholdToCIDR(th float64) string {
 		} else if prefix > 32 {
 			prefix = 32
 		}
-		return fmt.Sprintf("/%d", prefix)
+		return "/" + strconv.Itoa(prefix)
 	}
 }

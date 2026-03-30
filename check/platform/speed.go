@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -159,7 +160,7 @@ func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, getNetBytes f
 
 	slog.Debug("测速完成",
 		"speed_KB_s", speed,
-		"duration_s", fmt.Sprintf("%.2f", duration),
+		"duration_s", strconv.FormatFloat(duration, 'f', 2, 64),
 		"bytes", totalBytes,
 		"use_net_bytes", useNetBytes,
 	)

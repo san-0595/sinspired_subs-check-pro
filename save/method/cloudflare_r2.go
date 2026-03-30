@@ -157,7 +157,8 @@ func (r *R2Uploader) doUpload(jsonData []byte) error {
 
 // createRequest 创建HTTP请求
 func (r *R2Uploader) createRequest(jsonData []byte) (*http.Request, error) {
-	url := fmt.Sprintf("%s/storage?token=%s", r.workerURL, r.token)
+	url := utils.JoinURL(r.workerURL, "storage") + "?token=" + r.token
+
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
