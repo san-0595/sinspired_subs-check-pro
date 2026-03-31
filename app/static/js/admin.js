@@ -721,7 +721,8 @@ import { initQuickPreview } from './cfg-quickpreview.js';
           processed === 0 &&
           !forceClose &&
           !successlimited &&
-          !processResults
+          !processResults &&
+          !checking
         ) {
           switchUIState('preparing')
           updateToggleUI('preparing')
