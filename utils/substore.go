@@ -88,18 +88,28 @@ const (
 	OldSingboxJS      = "https://raw.githubusercontent.com/sinspired/sub-store-template/main/1.11.x/sing-box.js"
 
 	// nodeSplitScript 将 DNS 解析得到的多 IP 展开为独立节点
-	nodeSplitScript = `function operator(proxies = []) {
+    nodeSplitScript = `// 节点裂变脚本
+function operator(proxies = []) {
   const list = []
-  proxies.map((p = {}) => {
-    let ips = p._resolved_ips
+  for (const p of proxies) {
+    const ips = p._resolved_ips
     if (Array.isArray(ips) && ips.length > 0) {
-      ips.map((server, index) => {
-        list.push({ ...p, name: ` + "`${p.name}${index + 1}`" + `, server })
+      ips.forEach((server, i) => {
+        list.push({
+          ...p,
+          name: ` + "`" + `${p.name}|+${i + 1}` + "`" + `,
+          server,
+        })
+      })
+      list.push({
+        ...p,
+        name: ` + "`" + `${p.name}|已裂变` + "`" + `,
+        server: p._domain,
       })
     } else {
       list.push(p)
     }
-  })
+  }
   return list
 }`
 
