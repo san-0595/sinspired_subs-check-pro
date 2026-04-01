@@ -132,6 +132,7 @@ jobs:
             项目: `${{ github.repository }}`
 
             说明:
+              - 更新 mihomo，支持 xhttp
               - 修复 Gemini 解锁检测不准确，支持欧盟区标签显示
               - 添加 Copilot 解锁检测
               - WebUI 为列表添加拖拽排序
