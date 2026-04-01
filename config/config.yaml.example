@@ -16,7 +16,7 @@ progress-mode: "auto"
 
 # cron表达式，如果正确配置此项，将忽略check-interval
 # 建议使用：0 4,16 * * *
-cron-expression: ""
+cron-expression: "0 4,16 * * *"
 
 # 检查间隔(分钟)
 # 建议使用 cron-expression 表达式，每天凌晨4点和16点执行一次
@@ -31,26 +31,26 @@ check-interval: 720
 # 测活-测速-媒体检测并行,缓冲通道占满后会成为瓶颈
 
 # 测活阶段，建议：10-1000
-alive-concurrent: 0
+alive-concurrent: 100
 # 测速阶段，建议：4-32
-speed-concurrent: 0
+speed-concurrent: 8
 # 媒体解锁检测，建议：10-200
-media-concurrent: 0
+media-concurrent: 50
 
 # 是否启用IPv6，默认禁用
 ipv6: false
 
 # 超时时间(毫秒)(节点的最大延迟)，主要影响测活任务
-timeout: 6000
+timeout: 8000
 
 # 并发线程数，用于未设置测活、测速、媒体解锁检测时，自动计算并发数的基准
 # 主要影响获取订阅任务，超过100会设置为100
-concurrent: 20
+concurrent: 10
 
 # 保存几个成功的节点，为0代表不限制
 # 如果你的并发数量超过这个参数，那么成功的结果可能会大于这个数值
 # success-limit <= success <= success-limit+concurrent
-success-limit: 200
+success-limit: 100
 
 # 此选项将保存并加载 {上次检测成功的节点} 和 {历次检测成功的节点}
 # 如果为true，则保留之前测试成功的节点
@@ -103,14 +103,14 @@ update: true
 # 启动时检查更新版本
 update-on-startup: true
 # 定时检查更新
-# "0 0,9,21 * * *" 默认每天9点,21点检查更新
-cron-check-update: "0 9,21 * * *"
+# "0 9,21 * * *" 每天9点,21点检查更新
+cron-check-update: "0 9-23/2,0 * * *"
 # 使用预发布版本
 prerelease: false
 # 下载新版本超时时间(分钟)(默认2分钟)
 # 如系统代理和github代理不稳定,可适当调大即可
 # 请输入整数
-update-timeout: 2
+update-timeout: 5
 
 # -----------WebUI-----------
 # 监听端口，用于直接返回节点信息，方便订阅转换
@@ -196,13 +196,13 @@ singbox-old:
 # sub-store同步gist定时任务
 # 定时任务指定时将订阅/文件上传到私有 Gist. 在前端, 叫做 同步 或 同步配置.
 # 55 23 * * * 每天 23 点 55 分(避开部分机场后端每天0点定时重启)
-sub-store-sync-cron: "55 5-23/2 * * *"
+sub-store-sync-cron: "55 5-23/4 * * *"
 # 定时更新订阅
 # SUB_STORE_PRODUCE_CRON 在后台定时处理订阅. 格式为 0 */2 * * *,sub,sub_A;0 */3 * * *,col,col_B
 # 即每 2 小时处理一次单条订阅 sub_A，每 3 小时处理一次组合订阅 col_B。
 # subs-check-pro 默认上传的订阅名为： sub
 # 比如你有一个sub-store订阅,名称为 jichang,就可以填 0 */2 * * *,sub,sub,jichang
-sub-store-produce-cron: "0 */2 * * *,sub,sub"
+sub-store-produce-cron: "0 */4 * * *,sub,sub"
 # sub-store推送服务地址
 # 例如：Bark: "SUB_STORE_PUSH_SERVICE=https://api.day.app/XXXXXXXXXXXX/[推送标题]/[推送内容]"
 # 注意：仅需修改 XXXXXXXXXXXX 为自己的 token，[推送标题]/[推送内容] 会被sub-store自动替换为对应的内容
@@ -353,23 +353,26 @@ github-proxy: ""
 # GitHub 代理列表：程序会自动筛选可用的 GitHub 代理
 ghproxy-group:
   - https://gh.b52m.cn/
-  - https://git.1999111.xyz/
-  - https://git.maomao.ovh/
-  - https://github.732086.xyz/
-  - https://gh-proxy.mereith.com/
   - https://github.180280.xyz/
-  - https://v6.gh-proxy.org/
-  - https://gh.xda.plus/
-  - https://edgeone.gh-proxy.org/
-  - https://proxydl.lcayun.cn/
-  - https://git.repcz.link/
-  - https://gh.oevery.me/
   - https://hk.gh-proxy.org/
+  - https://git.maomao.ovh/
   - https://cdn.gh-proxy.org/
-  - https://g.108964.xyz/
-  - https://gh-proxy.org/
+  - https://v6.gh-proxy.org/
+  - https://github.sssss.work/
+  - https://gh.dev.438250.xyz/
+  - https://git.llvho.com/
+  - https://gh.oevery.me/
   - https://github.dpik.top/
-  - https://github.catvod.com/
+  - https://g.108964.xyz/
+  - https://down.avi.gs/
+  - https://git.1999111.xyz/
+  - https://github.732086.xyz/
+  - https://gh-proxy.org/
+  - https://gh.8p.gs/
+  - https://git.repcz.link/
+  - https://proxydl.lcayun.cn/
+  - https://edgeone.gh-proxy.org/
+  - https://gh.xda.plus/
 
 # -----------获取订阅-----------
 # 重试次数(获取订阅失败后重试次数)

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -72,6 +73,17 @@ func runGhProxyDetection(t *testing.T, proxies []string, listFile, detailFile st
 		detailFile = "test_gh_detail.csv"
 	}
 	t.Helper()
+
+	// 去除尾部 / 后去重
+	normalized := make([]string, len(proxies))
+	for i, p := range proxies {
+		normalized[i] = strings.TrimRight(p, "/")
+	}
+	unique := deduplicateStrings(normalized)
+	if diff := len(proxies) - len(unique); diff > 0 {
+		t.Logf("已去除 %d 个重复代理，剩余 %d 个", diff, len(unique))
+	}
+	proxies = unique
 
 	type result struct {
 		proxy     string
@@ -177,6 +189,19 @@ func runGhProxyDetection(t *testing.T, proxies []string, listFile, detailFile st
 	)
 
 	t.Logf("已输出 %d 个可用代理，列表: %s，详情: %s", len(allAvailable), listFile, detailFile)
+}
+
+// deduplicateStrings 对字符串切片去重，保持原有顺序
+func deduplicateStrings(ss []string) []string {
+	seen := make(map[string]struct{}, len(ss))
+	out := ss[:0:0] // 复用底层数组但不修改原切片
+	for _, s := range ss {
+		if _, exists := seen[s]; !exists {
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // GitHub 代理列表
