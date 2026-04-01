@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -283,7 +284,7 @@ func checkGhProxyAvailable(githubProxy string) (bool, string, float64) {
 
 // isSysProxyAvailable 并发检测代理是否可用
 // 要求 Google 204 和 GitHub Raw 两个检测目标都成功
-func isSysProxyAvailable(proxy string) bool {
+func isSysProxyAvailable(ctx context.Context, proxy string) bool {
 	proxyURL, err := url.Parse(proxy)
 	if err != nil {
 		return false
@@ -302,7 +303,7 @@ func isSysProxyAvailable(proxy string) bool {
 		url        string
 		expectCode int
 	}{
-		{"https://www.google.com/generate_204", http.StatusNoContent},                           // 204
+		{"http://www.gstatic.com/generate_204", http.StatusNoContent},                           // 204
 		{"https://raw.githubusercontent.com/github/gitignore/main/Go.gitignore", http.StatusOK}, // 200
 	}
 
@@ -314,7 +315,7 @@ func isSysProxyAvailable(proxy string) bool {
 		wg.Add(1)
 		go func(target string, expect int) {
 			defer wg.Done()
-			req, err := http.NewRequest("GET", target, nil)
+			req, err := http.NewRequestWithContext(ctx, "GET", target, nil) // 传入 ctx
 			if err != nil {
 				results <- false
 				return
@@ -347,11 +348,16 @@ func isSysProxyAvailable(proxy string) bool {
 // findAvailableSysProxy 优先检测配置文件中的代理，不可用则并发检测常见端口
 func findAvailableSysProxy(configProxy string, candidates []string) string {
 	// Step 1: 优先检测配置文件中的代理
-	if configProxy != "" && isSysProxyAvailable(configProxy) {
+	// 用独立 ctx 避免影响后续并发检测
+	stepCtx, stepCancel := context.WithCancel(context.Background())
+	defer stepCancel()
+	if configProxy != "" && isSysProxyAvailable(stepCtx, configProxy) {
 		return configProxy
 	}
 
-	// Step 2: 并发检测候选代理
+	// Step 2: 并发检测候选代理，找到第一个即取消其余
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	resultCh := make(chan string, 1)
 	var wg sync.WaitGroup
 
@@ -359,9 +365,10 @@ func findAvailableSysProxy(configProxy string, candidates []string) string {
 		wg.Add(1)
 		go func(p string) {
 			defer wg.Done()
-			if isSysProxyAvailable(p) {
+			if isSysProxyAvailable(ctx, p) {
 				select {
 				case resultCh <- p: // 只取第一个可用的
+					cancel() // 通知其余 goroutine 退出
 				default:
 				}
 			}
