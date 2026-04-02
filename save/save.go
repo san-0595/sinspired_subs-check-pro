@@ -38,7 +38,12 @@ type ConfigSaver struct {
 }
 
 // localClient 用于本地 SubStore 请求
-var localClient = &http.Client{Timeout: 15 * time.Second}
+var localClient = &http.Client{
+	Timeout: 15 * time.Second,
+	Transport: &http.Transport{
+		Proxy: nil, // 本地请求不走任何代理
+	},
+}
 
 // NewConfigSaver 创建新的配置保存器，支持显式指定保存方法
 func NewConfigSaver(results []check.Result, saveMethodName string) *ConfigSaver {
@@ -167,7 +172,8 @@ func (cs *ConfigSaver) generateMihomo(proxies []map[string]any) ([]byte, error) 
 		return buildMihomoYAML(proxies)
 	}
 
-	if config.GlobalConfig.SubStorePort == "" {
+	// 同时检查端口配置和运行状态，避免无效连接
+	if config.GlobalConfig.SubStorePort == "" || !assets.IsSubStoreRunning.Load() {
 		return fallback()
 	}
 
@@ -314,7 +320,7 @@ func mergeMihomoTemplate(templateData []byte, proxies []map[string]any) ([]byte,
 	templateData = nil //nolint:ineffassign
 	merged["proxies"] = proxies
 	result, err := yaml.Marshal(merged)
-	merged = nil //nolint:ineffassign
+	merged = nil  //nolint:ineffassign
 	proxies = nil //nolint:ineffassign
 	return result, err
 }

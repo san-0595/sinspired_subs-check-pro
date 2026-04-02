@@ -88,7 +88,7 @@ const (
 	OldSingboxJS      = "https://raw.githubusercontent.com/sinspired/sub-store-template/main/1.11.x/sing-box.js"
 
 	// nodeSplitScript 将 DNS 解析得到的多 IP 展开为独立节点
-    nodeSplitScript = `// 节点裂变脚本
+	nodeSplitScript = `// 节点裂变脚本
 function operator(proxies = []) {
   const list = []
   for (const p of proxies) {
@@ -759,6 +759,7 @@ func updateSub(s sub) error {
 		SubUserInfo string `json:"subUserinfo,omitempty"`
 		Process     []any  `json:"process"`
 	}{
+		Icon:        s.Icon,
 		Content:     s.Content,
 		SubUserInfo: s.SubUserInfo,
 		Process:     merged,
