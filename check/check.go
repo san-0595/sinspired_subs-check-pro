@@ -118,6 +118,8 @@ type ProxyJob struct {
 
 	NeedCF         bool
 	IsCfAccessible bool
+
+	GoogleCountry string // policies.google.com 预取的国家码（alpha-2），供 youtube/gemini 共享
 }
 
 // Close 确保 ProxyJob 的底层资源(mihomo客户端)被正确释放一次。
@@ -825,6 +827,7 @@ func checkAlive(job *ProxyJob, ctx context.Context) bool {
 	if err == nil && gstatic {
 		return true
 	}
+	slog.Info("测活出错", "Name", job.Client.mProxy.Name(), "error", err)
 	return false
 }
 
@@ -851,6 +854,21 @@ func mediaCheck(job *ProxyJob, db *maxminddb.Reader, ctx context.Context) {
 	}
 
 	plats := config.GlobalConfig.Platforms
+
+	// 若同时检测 youtube 或 gemini，提前获取 Google 国家码供两者共享，避免重复请求
+	needGoogleCountry := false
+	for _, p := range plats {
+		if p == "youtube" || p == "gemini" {
+			needGoogleCountry = true
+			break
+		}
+	}
+	if needGoogleCountry {
+		if country, err := platform.GetGoogleCountry(mediaClient); err == nil && country != "" {
+			job.GoogleCountry = country
+		}
+	}
+
 	var wg sync.WaitGroup
 	for _, plat := range plats {
 		wg.Go(func() {
@@ -900,16 +918,6 @@ func checkOnePlatform(job *ProxyJob, plat string, mediaClient *http.Client, db *
 			break
 		}
 		job.Result.Copilot, job.Result.CopilotAPI = homeOK, apiOK
-	case "youtube":
-		var region string
-		withRetry(ctx, func() error { //nolint:errcheck
-			var e error
-			region, e = platform.CheckYoutube(mediaClient)
-			return e
-		})
-		if region != "" {
-			job.Result.Youtube = region
-		}
 	case "netflix":
 		var ok bool
 		withRetry(ctx, func() error { //nolint:errcheck
@@ -930,15 +938,67 @@ func checkOnePlatform(job *ProxyJob, plat string, mediaClient *http.Client, db *
 		if ok {
 			job.Result.Disney = true
 		}
+	case "youtube":
+		var ytRaw string
+		withRetry(ctx, func() error {
+			var e error
+			ytRaw, e = platform.CheckYoutube(mediaClient)
+			return e
+		})
+
+		// 分离地区码和 Premium 标记
+		// ytRaw 可能是: "US" / "US⁻" / "⁻" / "CN" / ""
+		ytRegion := strings.TrimSuffix(ytRaw, "⁻")
+		ytNoPremium := strings.HasSuffix(ytRaw, "⁻")
+
+		// 地区兜底：无论是否单独检测，逻辑统一
+		switch {
+		case ytRegion == "CN":
+			// CN 封锁，不设置结果
+		case ytRegion != "" && job.GoogleCountry != "" && ytRegion != job.GoogleCountry:
+			// 两者均有值但不一致，以 YouTube 自身检测为准
+			slog.Debug("YouTube地区与Google策略页不一致，以Google策略页为准",
+				"youtube", ytRegion, "google_policy", job.GoogleCountry)
+			job.Result.Youtube = job.GoogleCountry
+		case ytRegion != "":
+			job.Result.Youtube = ytRegion
+		case job.GoogleCountry != "" && ytRaw != "CN":
+			// YouTube 检测失败，降级使用 GoogleCountry
+			slog.Debug("YouTube检测失败，降级使用GoogleCountry", "country", job.GoogleCountry)
+			job.Result.Youtube = job.GoogleCountry
+		}
+
+		// Premium 标记附加在最终地区码上
+		if job.Result.Youtube != "" && ytNoPremium {
+			job.Result.Youtube += "⁻"
+		}
+
 	case "gemini":
+		// 主路径：含特征码，可识别 Normal/Blocked/Suspect 三种状态
 		var status platform.GeminiStatus
-		withRetry(ctx, func() error { //nolint:errcheck
+		err := withRetry(ctx, func() error {
 			var e error
 			status, e = platform.CheckGemini(mediaClient)
 			return e
 		})
-		if status.Region != "" {
+
+		switch {
+		case err == nil && status.Region != "":
+			// 完全成功
 			job.Result.Gemini = status
+		case errors.Is(err, platform.ErrGeminiBotDetected):
+			// bot 拦截：不代表地区封锁，降级判断
+			// 只能区分 Normal/Blocked，无法识别 Suspect
+			if job.GoogleCountry != "" {
+				job.Result.Gemini = platform.CheckGeminiByCountry(job.GoogleCountry)
+				slog.Debug("Gemini被bot检测拦截，降级判断", "country", job.GoogleCountry)
+			}
+		case err != nil:
+			// 真正的网络错误，不可达，不设置结果
+			slog.Debug("Gemini不可达", "error", err)
+		default:
+			// err==nil 但 Region 为空：页面结构变化，无法解析
+			slog.Debug("Gemini响应正常但未解析到地区")
 		}
 	case "tiktok":
 		var region string
@@ -1012,7 +1072,7 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 	if config.GlobalConfig.MediaCheck {
 		// 移除旧标签
 		name = regexp.MustCompile(
-			`\s*\|(?:NF|D\+|GPT[⁺]?|CP[⁻]?|GM[⁺]?[ˀ]?(?:-[A-Z]{2})?|X|YT(?:-[^|]+)?|TK(?:-[^|]+)?|\d+%)`).
+			`\s*\|(?:NF|D\+|GPT[⁺]?|CP[⁻]?|GM[⁺]?[ˀ]?(?:-[A-Z]{2})?|X|YT[⁻]?(?:-[A-Z]{2}[⁻]?)?|TK[⁻]?(?:-[^|]+)?|\d+%)`).
 			ReplaceAllString(name, "")
 	}
 
@@ -1043,6 +1103,25 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 			if res.Disney {
 				tags = append(tags, "D+")
 			}
+		case "youtube":
+			yt := res.Youtube
+			switch {
+			case yt == "":
+				// 不可达或封锁，无标签
+			default:
+				// 分离地区和 Premium 标记
+				region := strings.TrimSuffix(yt, "⁻")
+				noPremium := strings.HasSuffix(yt, "⁻")
+
+				tag := "YT"
+				if noPremium {
+					tag += "⁻"
+				}
+				if region != "" && region != res.Country {
+					tag = "YT-" + region
+				}
+				tags = append(tags, tag)
+			}
 		case "gemini":
 			g := res.Gemini
 			if g.Region == "" {
@@ -1066,15 +1145,6 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 		case "iprisk":
 			if res.IPRisk != "" {
 				tags = append(tags, res.IPRisk)
-			}
-		case "youtube":
-			if res.Youtube != "" {
-				// 只有YouTube地区和节点位置不一致时才添加YouTube地区
-				if res.Country != res.Youtube {
-					tags = append(tags, "YT-"+res.Youtube)
-				} else {
-					tags = append(tags, "YT")
-				}
 			}
 		case "tiktok":
 			if res.TikTok != "" {
