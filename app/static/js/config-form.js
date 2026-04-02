@@ -514,20 +514,21 @@ const SCHEMA = [
 
 /* ═══════════════════════════ 字段校验规则 ═══════════════════════════ */
 const FIELD_VALIDATORS = {
+  // ── 并发与限制 ──
   'concurrent': v => {
     if (!_anyAutoMode()) return null;
     const n = Number(v);
     const { alive, speed, media } = _estimateAuto();
-    if (n > 100) return { level: 'warn', msg: `并发 ${n} 过高，将影响拉取订阅的成功率` };
+    if (n > 100) return { level: 'warn', msg: `并发 ${n} 过高，将影响拉取订阅成功率` };
     return { level: 'info', msg: `自动模式基准 ${n} → 测活 ≈ ${alive} · 测速 ≈ ${speed} · 媒体 ≈ ${media}` };
   },
   'alive-concurrent': v => {
     const n = Number(v);
     if (n === 0 || _anyAutoMode()) {
-      const { alive, speed, media, base } = _estimateAuto();
+      const { alive, base } = _estimateAuto();
       return { level: 'ok', msg: `自适应模式（基准 =${base}）· 测活 ≈ ${alive}` };
     }
-    if (n > 1000) return { level: 'warn', msg: `并发 ${n} 过高，超出多数路由器处理能力，可能影响正常上网，建议 100–300` };
+    if (n > 1000) return { level: 'warn', msg: `并发 ${n} 过高，易影响正常上网，建议 100–300` };
     if (n > 500) return { level: 'warn', msg: `并发 ${n} 过高，超出多数路由器处理能力，建议 100–300` };
     if (n > 300) return { level: 'info', msg: `并发 ${n} 偏高，请确认机器性能` };
     return null;
@@ -536,7 +537,7 @@ const FIELD_VALIDATORS = {
   'speed-concurrent': v => {
     const n = Number(v);
     if (n === 0 || _anyAutoMode()) {
-      const { alive, speed, media, base } = _estimateAuto();
+      const { speed, base } = _estimateAuto();
       return { level: 'ok', msg: `自适应模式（基准 =${base}）· 测速 ≈ ${speed}` };
     }
     if (n > 32) return { level: 'warn', msg: `并发 ${n} 较高，测速会占用大量带宽，建议配合 total-speed-limit` };
@@ -546,22 +547,74 @@ const FIELD_VALIDATORS = {
   'media-concurrent': v => {
     const n = Number(v);
     if (n === 0 || _anyAutoMode()) {
-      const { alive, speed, media, base } = _estimateAuto();
+      const { media, base } = _estimateAuto();
       return { level: 'ok', msg: `自适应模式（基准 =${base}）· 媒体 ≈ ${media}` };
     }
     if (n > 200) return { level: 'warn', msg: `并发 ${n} 较高，建议不超过 200` };
     if (n > 0 && n <= 100) return { level: 'info', msg: `并发 ${n} 合理` };
     return null;
   },
-  'timeout': v => { const n = Number(v); if (n < 3000) return { level: 'warn', msg: `超时 ${n}ms 过短，可能大量误杀正常节点` }; if (n > 15000) return { level: 'info', msg: `超时 ${n}ms 较长，单次检测耗时会明显增加` }; return null; },
+
+  // ── 时间与数值限制 ──
+  'timeout': v => { const n = Number(v); if (n < 3000) return { level: 'warn', msg: `超时 ${n}ms 超时过短易误杀正常节点` }; if (n > 15000) return { level: 'info', msg: `超时 ${n}ms 较长，检测耗时会明显增加` }; return null; },
+
   'check-interval': v => { const n = Number(v); if (!n) return null; if (n < 120) return { level: 'warn', msg: `间隔 ${n} 分钟过于频繁，易触发运营商阻断，建议 ≥ 720` }; if (n < 360) return { level: 'info', msg: `间隔 ${n} 分钟偏短，建议 720+` }; if (n >= 720) return { level: 'ok', msg: `间隔 ${n} 分钟（约 ${Math.round(n / 60)} 小时），频率合理` }; return null; },
-  'min-speed': v => { const n = Number(v); if (n === 0) return { level: 'info', msg: '未设置最低速度，极慢节点均会保留' }; if (n > 2000) return { level: 'warn', msg: `${n} KB/s 偏高，建议 ≤ 500` }; return null; },
+
+  'min-speed': v => { const n = Number(v); if (n === 0) return { level: 'info', msg: '未设置最低速度' }; if (n > 2000) return { level: 'warn', msg: `${n} KB/s 偏高，建议 ≤ 500` }; return null; },
   'download-timeout': v => { if (Number(v) === 0) return { level: 'warn', msg: '未设置，极慢节点会阻塞测速队列，建议设为 10s' }; if (Number(v) > 15) return { level: 'warn', msg: '下载超时不宜设置过高，节点易被测死' }; return null; },
   'download-mb': v => { if (Number(v) === 0) return { level: 'info', msg: '未限制单节点下载量，高并发时可能消耗大量流量，建议 20 MB' }; if (Number(v) >= 100) return { level: 'warn', msg: '过大的下载量将对代理节点造成较大压力，建议 20 MB' }; return null; },
   'success-limit': v => { const n = Number(v); if (n > 0 && n < 5) return { level: 'info', msg: `保存上限 ${n} 较少，建议 100-200` }; if (n >= 100 && n < 200) return { level: 'info', msg: `保存上限 ${n}，视手机性能，mihomo 类 VPN 超过 100 个节点会增加分组切换压力` }; if (n > 200) return { level: 'warn', msg: `保存上限 ${n} 较多，建议不超过 200` }; return null; },
   'media-check-timeout': v => { if (Number(v) === 0) return { level: 'warn', msg: '未设置，默认为 10s' }; if (Number(v) < 5) return { level: 'warn', msg: '媒体解锁超时太小，可能无法获取结果' }; if (Number(v) > 15) return { level: 'warn', msg: '媒体解锁检测超时太高，建议 5-15 秒' }; return null; },
 
   'gc-threshold': v => { const n = Number(v); if (n === 0) return { level: 'info', msg: `默认阈值 20000` }; if (n > 0 && n < 10000) return { level: 'warn', msg: `阈值 ${n}太低，将导致频繁内存回收，增加 CPU 压力` }; if (n >= 10000 && n <= 100000) return { level: 'info', msg: `阈值 ${n} 适合中等数量订阅池` }; if (n > 100000) return { level: 'warn', msg: `阈值 ${n} 较高，请关注运行时内存占用` }; return null; },
+
+  // 基础网络与路径校验
+  'system-proxy': v => {
+    const s = String(v).trim().toLowerCase();
+    if (!s || s === 'direct') return null; // 允许空或 direct
+    if (!/^(http|https|socks5|socks5h):\/\//.test(s)) return { level: 'warn', msg: '代理地址应包含协议头，如 http:// 或 socks5://' };
+    return { level: 'ok', msg: '代理格式合规，请自行确保代理可用' };
+  },
+  'speed-test-url': v => {
+    const s = String(v).trim();
+    if (!s || s.toLowerCase() === 'random') return null;
+    if (!/^https?:\/\//i.test(s)) {
+      return { level: 'warn', msg: '测速地址应以 http:// 或 https:// 开头' };
+    }
+    return null;
+  },
+
+  'sub-store-path': v => {
+    const s = String(v).trim();
+    if (!s) return null;
+    if (!s.startsWith('/')) {
+      return { level: 'warn', msg: '路径建议以 / 开头，例如：/my-sub-store' };
+    }
+    if (/\s/.test(s)) {
+      return { level: 'warn', msg: '路径中不应包含空格' };
+    }
+    return null;
+  },
+
+  'github-api-mirror': v => {
+    const s = String(v).trim();
+    if (!s) return null;
+    if (!/^https?:\/\//i.test(s)) {
+      return { level: 'warn', msg: '请填写完整的 URL，如 https://.../' };
+    }
+    if (!s.endsWith('/')) {
+      return { level: 'info', msg: '建议在末尾加上 / 以防路径拼接错误' };
+    }
+    return null;
+  },
+
+  'sub-urls-retry': v => {
+    const n = Number(v);
+    if (!v) return null;
+    if (n > 10) return { level: 'warn', msg: `重试 ${n} 次过多，如果节点失效，重试太多次会严重拖慢运行速度` };
+    if (n > 5) return { level: 'info', msg: '建议重试次数不要超过 5 次' };
+    return null;
+  },
 
   /* success-rate 校验：入参为界面显示值（0–100%），存储值为其 ÷1000 */
   'success-rate': v => {
@@ -598,6 +651,17 @@ const FIELD_VALIDATORS = {
 
     // 兜底提示
     return { level: 'info', msg: `阈值 ${formatRate(n)} 已应用` };
+  },
+  'listen-port': v => {
+    const r = _validatePortField(v);
+    if (!r || r.level !== 'ok') return r;
+    return _checkPortConflict(v, 'sub-store-port', 'Sub-Store') || r;
+  },
+  'sub-store-port': v => {
+    if (!String(v).trim()) return { level: 'info', msg: '留空，不启动 Sub-Store 服务，禁用自动生成订阅链接' };
+    const r = _validatePortField(v);
+    if (!r || r.level !== 'ok') return r;
+    return _checkPortConflict(v, 'listen-port', '主监听') || r;
   },
 };
 
@@ -679,11 +743,25 @@ const _expDecay = (amp, b, base) => x => base + amp * (1 - Math.exp(-b * x));
 const _powerDecay = (amp, p, alpha, base) => x => { if (x <= 0) return base; const xp = x ** p; return base + amp * xp / (xp + alpha); };
 const _roundInt = v => Math.round(v);
 
-/** 从表单读取 number 字段当前值，找不到则返回 fallback */
-function _readNum(key, fallback = 0) {
-  const inp = document.querySelector(`input[type="number"][data-key="${key}"]`);
-  const v = parseFloat(inp?.value);
-  return (isNaN(v) || v < 0) ? fallback : v;
+/**
+ * 统一的表单值读取器
+ * 优先读取 DOM 以实现实时联动，DOM 无值时回退到 _cfg 或 fallback
+ */
+function _getLiveVal(key, fallback = '') {
+  // 限定只能找 input、select 或 textarea，避开外层 div
+  const inp = document.querySelector(`input[data-key="${key}"], select[data-key="${key}"], textarea[data-key="${key}"]`);
+  let val;
+  if (inp) {
+    val = inp.type === 'checkbox' ? inp.checked : inp.value;
+  } else {
+    val = _cfg?.[key];
+  }
+
+  if (typeof fallback === 'number') {
+    const n = parseFloat(val);
+    return (isNaN(n) || n < 0) ? fallback : n;
+  }
+  return (val !== undefined && val !== null) ? String(val).trim() : fallback;
 }
 
 /**
@@ -694,15 +772,9 @@ function _readNum(key, fallback = 0) {
  */
 function _estimateAuto() {
   // 优先从 _cfg 读（renderConfigForm 后始终最新），DOM 作为兜底（用户正在编辑时）
-  const _num = (key, fallback = 0) => {
-    const cfgVal = parseFloat(_cfg?.[key]);
-    if (!isNaN(cfgVal) && cfgVal >= 0) return cfgVal;
-    return _readNum(key, fallback);
-  };
-
-  const base = Math.max(1, _num('concurrent', 20));
-  const totalLimit = _num('total-speed-limit', 0);
-  const minSpeedKB = Math.max(1, _num('min-speed', 128));
+  const base = Math.max(1, _getLiveVal('concurrent', 20));
+  const totalLimit = _getLiveVal('total-speed-limit', 0);
+  const minSpeedKB = Math.max(1, _getLiveVal('min-speed', 128));
 
   const alive = _roundInt(_logDecay(400, 0.005, 400)(base));
 
@@ -718,15 +790,59 @@ function _estimateAuto() {
   return { alive, speed, media, base };
 }
 
+function _parsePort(v) {
+  const s = String(v).trim();
+  if (!s) return null;
+
+  const match = s.match(/^(?:([^:]*):)?(\d+)$/);
+  if (!match) return { err: '格式不合法，应为 port、:port 或 ip:port' };
+
+  let [, ip, portStr] = match;
+  if (ip === '') ip = undefined;
+
+  if (ip !== undefined && ip.toLowerCase() !== 'localhost') {
+    const segs = ip.split('.');
+    const valid = segs.length === 4 && segs.every(seg => {
+      const n = Number(seg);
+      return /^\d+$/.test(seg) && n >= 0 && n <= 255;
+    });
+    if (!valid) return { err: `IP 地址 "${ip}" 格式不合法` };
+  }
+
+  return { port: Number(portStr), ip: ip ?? null };
+}
+
+function _validatePortField(v) {
+  if (!String(v).trim()) return null;
+  const result = _parsePort(v);
+  if (!result) return null;
+  if (result.err) return { level: 'warn', msg: result.err };
+
+  const { port, ip } = result;
+  if (port < 1 || port > 65535)
+    return { level: 'warn', msg: `端口 ${port} 超出范围（1–65535）` };
+
+  const ipPart = ip ? `${ip}:` : '';
+  return { level: 'ok', msg: `监听 ${ipPart}${port}` };
+}
+
+/** 端口冲突校验 */
+function _checkPortConflict(currentVal, otherKey, otherName) {
+  const thisPort = String(currentVal).replace(/^.*:/, '');
+  const otherVal = _getLiveVal(otherKey, '');
+  const otherPort = String(otherVal).replace(/^.*:/, ''); // 加上 String() 更安全
+
+  if (thisPort && otherPort && thisPort === otherPort) {
+    return { level: 'warn', msg: `与 ${otherName}端口 ${otherPort} 冲突！` };
+  }
+  return null;
+}
+
 /** 判断三个并发字段中是否有任意一个为 0（触发联动自动模式）*/
 function _anyAutoMode() {
-  const _num = key => {
-    const cfgVal = parseFloat(_cfg?.[key]);
-    return (!isNaN(cfgVal) && cfgVal >= 0) ? cfgVal : _readNum(key, 0);
-  };
-  return _num('alive-concurrent') === 0
-    || _num('speed-concurrent') === 0
-    || _num('media-concurrent') === 0;
+  return _getLiveVal('alive-concurrent', 0) === 0
+    || _getLiveVal('speed-concurrent', 0) === 0
+    || _getLiveVal('media-concurrent', 0) === 0;
 }
 
 
@@ -802,41 +918,54 @@ function _updateInlineHint(row, result) {
 }
 
 function _attachValidator(row, fieldDef) {
-  if (fieldDef.type !== 'number') return;
-  const inp = row.querySelector('input[type="number"]');
+  // 1. 通用查找：明确限定标签名，防止找到 div
+  const inp = row.querySelector(`input[data-key="${fieldDef.key}"], select[data-key="${fieldDef.key}"], textarea[data-key="${fieldDef.key}"]`);
   if (!inp) return;
 
-  // ── 有校验函数的字段：绑定校验逻辑 ──
+  // 2. 绑定通用校验逻辑
   const fn = FIELD_VALIDATORS[fieldDef.key];
   if (fn) {
-    const run = () => _updateInlineHint(row, fn(inp.value));
+    const run = () => _updateInlineHint(row, fn(inp.type === 'checkbox' ? inp.checked : inp.value));
     inp.addEventListener('input', run);
     inp.addEventListener('change', run);
-    requestAnimationFrame(run);
+    requestAnimationFrame(run); // 初始化时执行一次，显示默认状态
   }
 
-  // ── 三个并发字段互相联动（同 tab 直接触发）──
-  const CONCURRENT_KEYS = ['alive-concurrent', 'speed-concurrent', 'media-concurrent'];
-  if (CONCURRENT_KEYS.includes(fieldDef.key)) {
+  // 3. 专属联动逻辑区
+  // ── A. 端口冲突双向联动 ──
+  const PORT_KEYS = ['listen-port', 'sub-store-port'];
+  if (PORT_KEYS.includes(fieldDef.key)) {
     inp.addEventListener('input', () => {
-      CONCURRENT_KEYS.filter(k => k !== fieldDef.key).forEach(k => {
-        document.querySelector(`input[type="number"][data-key="${k}"]`)
-          ?.dispatchEvent(new Event('change'));
+      PORT_KEYS.filter(k => k !== fieldDef.key).forEach(k => {
+        // 准确把 change 事件派发给对方的 input 框
+        document.querySelector(`input[data-key="${k}"]`)?.dispatchEvent(new Event('change'));
       });
     });
   }
 
-  // ── 基准字段：防抖 1s 后串行保存 + 重载 ──
-  const TRIGGER_KEYS = ['concurrent', 'total-speed-limit', 'min-speed', 'alive-concurrent', 'speed-concurrent', 'media-concurrent'];
-  if (TRIGGER_KEYS.includes(fieldDef.key)) {
-    let _basisTimer = null;
-    inp.addEventListener('input', () => {
-      clearTimeout(_basisTimer);
-      _basisTimer = setTimeout(async () => {
-        await window.saveConfigWithValidation?.();
-        await window.loadConfigValidated?.();
-      }, 1500);
-    });
+  // ── B. 并发控制联动与防抖保存 ──
+  if (fieldDef.type === 'number') {
+    const CONCURRENT_KEYS = ['alive-concurrent', 'speed-concurrent', 'media-concurrent'];
+    if (CONCURRENT_KEYS.includes(fieldDef.key)) {
+      inp.addEventListener('input', () => {
+        CONCURRENT_KEYS.filter(k => k !== fieldDef.key).forEach(k => {
+          document.querySelector(`input[data-key="${k}"]`)?.dispatchEvent(new Event('change'));
+        });
+      });
+    }
+
+    // ── 基准字段：防抖 1s 后串行保存 + 重载 ──
+    const TRIGGER_KEYS = ['concurrent', 'total-speed-limit', 'min-speed', ...CONCURRENT_KEYS];
+    if (TRIGGER_KEYS.includes(fieldDef.key)) {
+      let _basisTimer = null;
+      inp.addEventListener('input', () => {
+        clearTimeout(_basisTimer);
+        _basisTimer = setTimeout(async () => {
+          await window.saveConfigWithValidation?.();
+          await window.loadConfigValidated?.();
+        }, 1500);
+      });
+    }
   }
 }
 
