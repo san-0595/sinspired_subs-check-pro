@@ -347,6 +347,7 @@ func (app *App) getStatus(c *gin.Context) {
 		"checking":          app.checking.Load(),
 		"stepName":          check.CurrentStepName.Load(),
 		"proxyCount":        check.ProxyCount.Load(),
+		"processed":         check.Processed.Load(),
 		"available":         check.Available.Load(),
 		"progress":          check.Progress.Load(),
 		"forceClose":        check.ForceClose.Load(),

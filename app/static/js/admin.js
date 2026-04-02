@@ -454,7 +454,7 @@ import { initQuickPreview } from './cfg-quickpreview.js';
     // 2. 修改标题
     if (els.historyTitle) {
       // els.historyTitle.innerHTML = `${STATUS_SPINNER} 获取订阅`;
-      els.historyTitle.innerHTML = `获取订阅`
+      // els.historyTitle.innerHTML = `获取订阅`
     }
 
     // 3. 隐藏“未发现记录”
@@ -729,10 +729,10 @@ import { initQuickPreview } from './cfg-quickpreview.js';
           showProgressUI(false) // 隐藏进度条，保留 History 面板
 
           // 1. 更新状态栏 (只显示简略信息)
-          if (els.statusEl) {
-            els.statusEl.innerHTML = `${STATUS_SPINNER}<span>正在解析订阅...</span>`
-            els.statusEl.className = 'muted status-label status-prepare'
-          }
+          // if (els.statusEl) {
+          //   els.statusEl.innerHTML = `${STATUS_SPINNER}<span>正在解析订阅...</span>`
+          //   els.statusEl.className = 'muted status-label status-prepare'
+          // }
 
           // 2. 解析日志数据
           const stats = parseSubStats(lastLogLines)
@@ -753,6 +753,7 @@ import { initQuickPreview } from './cfg-quickpreview.js';
             d.proxyCount || 0,
             d.progress || 0,
             d.available || 0,
+            d.processed || 0,
             true,
             lastChecked,
             lastCheckInfo,
@@ -795,6 +796,7 @@ import { initQuickPreview } from './cfg-quickpreview.js';
           d.proxyCount || 0,
           d.progress || 0,
           d.available || 0,
+          d.processed || 0,
           false,
           lastChecked,
           lastCheckInfo,
@@ -905,8 +907,9 @@ import { initQuickPreview } from './cfg-quickpreview.js';
   function updateProgress(
     stepName,
     total,
-    processed,
+    progressValue,
     available,
+    processed,
     checking,
     lastChecked,
     lastCheckData,
@@ -927,6 +930,7 @@ import { initQuickPreview } from './cfg-quickpreview.js';
     const now = Date.now()
 
     total = Number(total) || 0
+    progressValue = Number(progressValue) || 0
     processed = Number(processed) || 0
 
     // --- 1. 状态管理（保留 startTime 用于 title 显示） ---
@@ -942,9 +946,9 @@ import { initQuickPreview } from './cfg-quickpreview.js';
     }
 
     // --- 2. 基础 UI 更新（原样保留） ---
-    const pct = total > 0 ? Math.min(100, (processed / total) * 100) : 0
+    const pct = total > 0 ? Math.min(100, (progressValue / total) * 100) : 0
     if (els.progressBar) els.progressBar.value = pct
-    if (els.progressText) els.progressText.textContent = `${processed}/${total}`
+    if (els.progressText) els.progressText.textContent = `${progressValue}/${total}`
     if (els.progressPercentTitle) els.progressPercentTitle.textContent = stepName
     if (els.progressPercent) {
       els.progressPercent.textContent = pct.toFixed(1) + '%'
