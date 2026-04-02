@@ -91,10 +91,8 @@ func (app *App) createDefaultConfig() error {
 
 			if needRandom {
 				val = "/" + utils.GenerateRandomString(20)
-			} else {
-				if !strings.HasPrefix(val, "/") {
-					val = "/" + val
-				}
+			} else if !strings.HasPrefix(val, "/") {
+				val = "/" + val
 			}
 
 			lines[i] = indent + "sub-store-path:" + afterSpaces + "\"" + val + "\""
@@ -197,16 +195,28 @@ func (app *App) initConfigWatcher() error {
 							}
 						}
 
-						if oldSubStorePort != "" && config.GlobalConfig.SubStorePort != "" && oldSubStorePort != config.GlobalConfig.SubStorePort {
-							// 重启sub-store服务
+						switch {
+						case oldSubStorePort != "" && config.GlobalConfig.SubStorePort != "" && oldSubStorePort != config.GlobalConfig.SubStorePort:
+							// 端口变更 → 重启
+							slog.Debug("重启 sub-store（端口变更）")
 							if app.cancel != nil && !app.checking.Load() {
 								app.cancel()
+								time.Sleep(500 * time.Millisecond)
+								if err := assets.KillNode(); err != nil {
+									slog.Error("强制清理 node 失败", "err", err)
+								}
 								app.ctx, app.cancel = context.WithCancel(context.Background())
 							}
 							assets.RunSubStoreService(app.ctx)
-						} else if oldSubStorePort == "" {
+
+						case oldSubStorePort == "" && config.GlobalConfig.SubStorePort != "":
+							// 首次配置端口 → 启动
+							slog.Debug("启动 sub-store")
 							assets.RunSubStoreService(app.ctx)
-						} else if config.GlobalConfig.SubStorePort == "" {
+
+						case oldSubStorePort != "" && config.GlobalConfig.SubStorePort == "":
+							// 端口被清空 → 停止
+							slog.Debug("停止 sub-store（端口已清空）")
 							if app.cancel != nil && !app.checking.Load() {
 								app.cancel()
 								app.ctx, app.cancel = context.WithCancel(context.Background())

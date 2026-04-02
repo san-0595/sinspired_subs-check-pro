@@ -80,13 +80,21 @@ func RunSubStoreService(ctx context.Context) {
 	listenPort := strings.TrimPrefix(config.GlobalConfig.ListenPort, ":")
 	subStorePort := strings.TrimPrefix(config.GlobalConfig.SubStorePort, ":")
 
-	if subStorePort == listenPort {
-		slog.Error("SubStore 服务因端口冲突禁用，请修改端口配置")
+	if subStorePort == "" {
+		IsSubStoreRunning.Store(false)
 		return
 	}
 
-	if subStorePort == "" {
-		IsSubStoreRunning.Store(false)
+	// 校验端口合法性（1~65535）
+	port, err := strconv.Atoi(subStorePort)
+	if err != nil || port < 1 || port > 65535 {
+		slog.Error("SubStore 端口不合法，请检查配置", "port", subStorePort)
+		return
+	}
+
+	if subStorePort == listenPort {
+		slog.Error("SubStore 服务因端口冲突禁用，请修改端口配置")
+		return
 	}
 
 	for {
@@ -234,16 +242,27 @@ func startSubStore(ctx context.Context) error {
 		hostPort := strings.Split(subStoreHost, ":")
 
 		// host可以为空，port不能为空
-		if len(hostPort) == 2 && hostPort[1] != "" {
-			cmd.Env = append(os.Environ(),
+		env := os.Environ()
+
+		switch {
+		case len(hostPort) == 2 && hostPort[1] != "":
+			// host + port
+			env = append(env,
 				"SUB_STORE_BACKEND_API_HOST="+hostPort[0],
 				"SUB_STORE_BACKEND_API_PORT="+hostPort[1],
 			)
-		} else if len(hostPort) == 1 {
-			cmd.Env = append(os.Environ(), "SUB_STORE_BACKEND_API_PORT="+normalizeSubstorePort(subStoreHost)) // 设置端口
-		} else {
+
+		case len(hostPort) == 1:
+			// only host, port needs normalization
+			env = append(env,
+				"SUB_STORE_BACKEND_API_PORT="+normalizeSubstorePort(subStoreHost),
+			)
+
+		default:
 			return fmt.Errorf("sub-store-port invalid port format: %s", subStoreHost)
 		}
+
+		cmd.Env = env
 	} else {
 		cmd.Env = append(os.Environ(), "SUB_STORE_BACKEND_API_PORT="+normalizeSubstorePort(subStoreHost)) // 设置端口
 	}
@@ -380,7 +399,10 @@ func decodeZstdToFile(decoder *zstd.Decoder, data []byte, targetPath string, per
 	}
 	defer file.Close()
 
-	decoder.Reset(bytes.NewReader(data))
+	if err := decoder.Reset(bytes.NewReader(data)); err != nil {
+		return err
+	}
+
 	if _, err := io.Copy(file, decoder); err != nil {
 		return fmt.Errorf("解压 %s 失败: %w", desc, err)
 	}
@@ -389,7 +411,10 @@ func decodeZstdToFile(decoder *zstd.Decoder, data []byte, targetPath string, per
 
 // extractTarFromZstd 解压嵌入的 zstd(tar) 到目标目录（用于前端资源）
 func extractTarFromZstd(decoder *zstd.Decoder, data []byte, targetDir string) error {
-	decoder.Reset(bytes.NewReader(data))
+	if err := decoder.Reset(bytes.NewReader(data)); err != nil {
+		return err
+	}
+
 	tarReader := tar.NewReader(decoder)
 	for {
 		header, err := tarReader.Next()
