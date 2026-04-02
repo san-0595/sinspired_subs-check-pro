@@ -132,17 +132,9 @@ jobs:
             项目: `${{ github.repository }}`
 
             说明:
-              - 更新 mihomo，支持 xhttp
-              - 修复 Gemini 解锁检测不准确，支持欧盟区标签显示
-              - 添加 Copilot 解锁检测
-              - WebUI 为列表添加拖拽排序
-              - WebUI 可视化分析报告优化,添加订阅成功率实时筛选
-              - 移动设备现在可以折叠日志显示
-              - 节点状态通知添加"消耗流量"数据
-              - 支持 HTTP/2, 优化连接复用逻辑
-              - 支持单独设置媒体解锁超时
-              - 提高订阅解析成功率，支持更多非标格式
-              - 优化内存占用，优化主动内存回收
-              - 错误修复和优化
+              - 重构订阅解析代码，修复部分协议内容丢失和端口错误转换
+              - 重构 Google 系媒体和 AI 解锁检测，识别 bot 检测
+              - WebUI 增加 v2ray 订阅链接，适配 xhttp
+              - 欢迎提交 PR 和 反馈 issure
               
             🔗 [查看详情](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }})
