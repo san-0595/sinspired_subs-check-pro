@@ -1,13 +1,11 @@
+// Package proxies 负责从各类订阅源获取、解析并去重代理节点。
 package proxies
 
 import (
 	"bufio"
 	"bytes"
-	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -18,18 +16,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/goccy/go-yaml"
-	"github.com/metacubex/mihomo/common/convert"
 	"github.com/samber/lo"
 	"github.com/sinspired/subs-check-pro/config"
+	"github.com/sinspired/subs-check-pro/proxy/parse"
 	"github.com/sinspired/subs-check-pro/save/method"
 	"github.com/sinspired/subs-check-pro/utils"
 )
-
-// ProxyNode 定义通用节点结构类型
-type ProxyNode map[string]any
 
 type SubUrls struct {
 	SubUrls []string `yaml:"sub-urls" json:"sub-urls"`
@@ -47,40 +41,69 @@ var (
 	SubStats            = make(map[string]SubStat)   // SubStats 存储订阅总数和成功数
 )
 
-// initEnvironment 初始化代理环境变量
-func initEnvironment() {
-	saver, err := method.NewLocalSaver()
-	if err == nil {
-		srcDir := saver.OutputPath
-		targetDir := filepath.Join(saver.OutputPath, "sub")
-		saver.OutputPath = targetDir
-		if err := os.MkdirAll(targetDir, 0o755); err != nil {
-			slog.Error("创建 sub 目录失败", "error", err)
-		}
-		if err := migrateOldFiles(srcDir, "history.yaml", targetDir); err == nil {
-			os.Remove(filepath.Join(srcDir, "history.yaml"))
-		} else {
-			slog.Info("迁移出错", "error", err, "srcDir", srcDir, "targetDir", targetDir)
-		}
-		if err := migrateOldFiles(srcDir, "all.yaml", targetDir); err == nil {
-			os.Remove(filepath.Join(srcDir, "all.yaml"))
-		}
-		if err := migrateOldFiles(srcDir, "mihomo.yaml", targetDir); err == nil {
-			os.Remove(filepath.Join(srcDir, "mihomo.yaml"))
-		}
-		if err := migrateOldFiles(srcDir, "base64.txt", targetDir); err == nil {
-			os.Remove(filepath.Join(srcDir, "base64.txt"))
-		}
+// logSubscriptionStats 打印订阅数量统计
+func logSubscriptionStats(total, local, remote, history int) {
+	args := []any{}
+	if local > 0 {
+		args = append(args, "本地", local)
+	}
+	if remote > 0 {
+		args = append(args, "远程", remote)
+	}
+	if history > 0 {
+		args = append(args, "历史", history)
+	}
+	if total < local+remote+history {
+		args = append(args, "总计[去重]", total)
+	} else {
+		args = append(args, "总计", total)
 	}
 
-	slog.Info("获取系统代理和Github代理状态")
-	utils.IsSysProxyAvailable = utils.GetSysProxy()
-	utils.IsGhProxyAvailable = utils.GetGhProxy()
-	if utils.IsSysProxyAvailable {
-		slog.Info("", "-system-proxy", config.GlobalConfig.SystemProxy)
+	uniqueSubsCount = total
+
+	slog.Info("订阅数量", args...)
+
+	if len(config.GlobalConfig.NodeType) > 0 {
+		val := "[" + strings.Join(config.GlobalConfig.NodeType, ",") + "]"
+		slog.Info("代理协议筛选", slog.String("Type", val))
 	}
-	if utils.IsGhProxyAvailable {
-		slog.Info("", "-github-proxy", config.GlobalConfig.GithubProxy)
+
+}
+
+func logFatal(err error, urlStr string) {
+	if code, convErr := strconv.Atoi(err.Error()); convErr == nil {
+		// err 是数字字符串，按状态码处理
+		var msg string
+		switch code {
+		case 400:
+			msg = "\033[31m错误请求\033[0m"
+		case 401, 403:
+			msg = "\033[31m无权限访问\033[0m"
+		case 404:
+			msg = "\033[31m订阅失效\033[0m"
+		case 405:
+			msg = "方法不被允许"
+		case 408:
+			msg = "请求超时"
+		case 410:
+			msg = "\033[31m资源已永久删除\033[0m"
+		case 429:
+			msg = "\033[33m请求过多，被限流\033[0m"
+		case 500, 502, 503, 504:
+			msg = "\033[31m服务端/网关错误\033[0m"
+		default:
+			msg = "请求失败"
+		}
+		// 对失效订阅加上删除线效果
+		if code == 404 || code == 401 || code == 410 {
+			urlStr = "\033[9m" + urlStr + "\033[29m"
+		}
+
+		slog.Error(msg, "URL", urlStr, "status", code)
+
+	} else {
+		// 普通错误
+		slog.Error("获取失败", "URL", urlStr, "error", err)
 	}
 }
 
@@ -97,7 +120,7 @@ func GetProxies() ([]map[string]any, int, int, int, error) {
 	logSubscriptionStats(len(subUrls), localNum, remoteNum, historyNum)
 
 	// 增大缓冲，减少消费者阻塞
-	proxyChan := make(chan ProxyNode, 100000)
+	proxyChan := make(chan map[string]any, 100000)
 
 	// 定义优先级常量
 	const (
@@ -115,7 +138,7 @@ func GetProxies() ([]map[string]any, int, int, int, error) {
 		// 存储去重后的节点。
 		// Key 为节点指纹，Value 为节点数据。
 		// 当指纹冲突时，保留优先级较高的版本 (Success > History > Normal)。
-		uniqueNodes = make(map[string]ProxyNode, 200000)
+		uniqueNodes = make(map[string]map[string]any, 200000)
 
 		// 记录已存储节点的优先级，用于比较
 		nodeKeepLevels = make(map[string]int, 200000)
@@ -160,7 +183,7 @@ func GetProxies() ([]map[string]any, int, int, int, error) {
 			}
 
 			// 3. 生成指纹
-			key := GenerateProxyKey(proxy)
+			key := utils.GenerateProxyKey(proxy)
 
 			// 4. 优先级竞争逻辑 (替代 DeduplicateAndMerge)
 			if existLevel, exists := nodeKeepLevels[key]; exists {
@@ -235,8 +258,7 @@ func GetProxies() ([]map[string]any, int, int, int, error) {
 		// 清理元数据
 		cleanMetadata(node)
 
-		// 这里的显式转换是为了满足返回值类型 []map[string]any
-		finalProxies = append(finalProxies, map[string]any(node))
+		finalProxies = append(finalProxies, node)
 	}
 
 	// 打印去重统计日志
@@ -269,7 +291,7 @@ func resolveSubUrls() ([]string, int, int, int) {
 		slog.Info("获取远程订阅列表")
 		for _, subURLRemote := range config.GlobalConfig.SubUrlsRemote {
 			// 处理为标准的raw地址
-			subURLRemote = NormalizeGitHubRawURL(subURLRemote)
+			subURLRemote = parse.NormalizeGitHubRawURL(subURLRemote)
 			warped := utils.WarpURL(subURLRemote, utils.IsGhProxyAvailable)
 			if remote, err := fetchRemoteSubUrls(warped); err != nil {
 				if !errors.Is(err, ErrIgnore) {
@@ -365,7 +387,7 @@ func fetchRemoteSubUrls(listURL string) ([]string, error) {
 	// 2.5) 解析为通用 map，尝试从 Clash/Mihomo 配置中提取 proxy-providers.*.url
 	var generic map[string]any
 	if err := yaml.Unmarshal(data, &generic); err == nil && len(generic) > 0 {
-		if urls := extractClashProviderURLs(generic); len(urls) > 0 {
+		if urls := parse.ExtractClashProviderURLs(generic); len(urls) > 0 {
 			return urls, nil
 		}
 	}
@@ -398,7 +420,7 @@ func fetchRemoteSubUrls(listURL string) ([]string, error) {
 }
 
 // processSubscription 单个订阅的处理流程
-func processSubscription(urlStr, tag string, wasSucced, wasHistory bool, out chan<- ProxyNode) {
+func processSubscription(urlStr, tag string, wasSucced, wasHistory bool, out chan<- map[string]any) {
 	// 1. 下载
 	data, err := FetchSubsData(urlStr)
 	if err != nil {
@@ -410,10 +432,10 @@ func processSubscription(urlStr, tag string, wasSucced, wasHistory bool, out cha
 	}
 
 	// 2. 解析
-	nodes, err := parseSubscriptionData(data, urlStr)
+	nodes, err := parse.ParseSubscriptionData(data, urlStr)
 	if err != nil {
 		// 回退策略：尝试正则暴力提取
-		nodes = fallbackExtractV2Ray(data, urlStr)
+		nodes = parse.FallbackExtractV2Ray(data, urlStr)
 		data = nil //nolint:ineffassign
 		if len(nodes) == 0 {
 			if !hasDatePlaceholder(urlStr) {
@@ -443,11 +465,11 @@ func processSubscription(urlStr, tag string, wasSucced, wasHistory bool, out cha
 		slog.Debug("processSubscription", "node", node)
 
 		// 统一清洗节点字段，注入默认值
-		NormalizeNode(node)
+		parse.NormalizeNode(node)
 
 		// 最终验证
 		serverStr := strings.TrimSpace(fmt.Sprintf("%v", node["server"]))
-		port := ToIntPort(node["port"])
+		port := parse.ToIntPort(node["port"])
 		if serverStr == "" || serverStr == "<nil>" || port <= 0 || port > 65535 || node["type"] == nil {
 			slog.Debug("过滤掉无效的畸形节点", "订阅", urlStr, "数据", node)
 			continue
@@ -467,228 +489,32 @@ func processSubscription(urlStr, tag string, wasSucced, wasHistory bool, out cha
 	slog.Debug("订阅解析完成", "URL", urlStr, "有效节点", count)
 }
 
-// fallbackExtractV2Ray 正则提取兜底
-func fallbackExtractV2Ray(data []byte, subURL string) []ProxyNode {
-	decodedData := TryDecodeBase64(data)
-	slog.Debug("base64解码", "decode", string(decodedData))
-	links := ExtractV2RayLinks(decodedData)
-	if len(links) == 0 {
-		return nil
-	}
-	slog.Debug("正则提取链接", "数量", len(links), "URL", subURL)
-
-	return ParseProxyLinksAndConvert(links, subURL)
-}
-
-// FetchSubsData 获取数据 (包含重试、占位符处理、代理策略)
-func FetchSubsData(rawURL string) ([]byte, error) {
-	// 清洗 URL
-	rawURL = CleanURL(rawURL)
-
-	if _, err := url.Parse(rawURL); err != nil {
-		return nil, err
-	}
-
-	slog.Debug("正在下载订阅", "URL", rawURL)
-
-	conf := config.GlobalConfig
-	maxRetries := max(1, conf.SubUrlsReTry)
-	timeout := max(10, conf.SubUrlsTimeout)
-
-	// 处理为标准的GitHub raw地址
-	rawURL = NormalizeGitHubRawURL(rawURL)
-
-	candidates, hasPlaceholder := buildCandidateURLs(rawURL)
-	var lastErr error
-
-	// 定义请求策略
-	type strategy struct {
-		useProxy bool
-		urlFunc  func(string) string
-	}
-
-	strategies := []strategy{}
-
-	warpFunc := func(s string) string { return utils.WarpURL(EnsureScheme(s), true) }
-	originFunc := func(s string) string { return EnsureScheme(s) }
-
-	if utils.IsLocalURL(rawURL) {
-		strategies = append(strategies, strategy{false, warpFunc})
-	} else {
-		// 1. 系统代理 (External utils)
-		if utils.IsSysProxyAvailable {
-			strategies = append(strategies, strategy{true, originFunc})
-		}
-		// 2. Github 代理 (External utils)
-		if utils.IsGhProxyAvailable {
-			strategies = append(strategies, strategy{false, warpFunc})
-		}
-		// 3. 直连兜底
-		strategies = append(strategies, strategy{false, originFunc})
-	}
-
-	// UA 列表池
-	uaList := []string{
-		convert.RandUserAgent(),
-		"mihomo/1.18.3",
-		"clash.meta",
-		"curl/8.16.0",
-	}
-
-	for i := range maxRetries {
-		ua := uaList[i%len(uaList)]
-		if i > 0 {
-			time.Sleep(time.Duration(max(1, conf.SubUrlsRetryInterval)) * time.Second)
-		}
-
-		for _, candidate := range candidates {
-			triedInThisLoop := make(map[string]struct{})
-
-			for _, strat := range strategies {
-				targetURL := strat.urlFunc(candidate)
-
-				key := targetURL + "|" + strconv.FormatBool(strat.useProxy)
-
-				if _, tried := triedInThisLoop[key]; tried {
-					continue
-				}
-				triedInThisLoop[key] = struct{}{}
-
-				// 保持 Debug，过于频繁的尝试详情不需要 Info
-				slog.Debug("尝试下载", "Target", targetURL, "Proxy", strat.useProxy)
-
-				body, err, fatal := fetchOnce(targetURL, strat.useProxy, timeout, ua)
-				if err == nil {
-					return body, nil
-				}
-				lastErr = err
-
-				if fatal && !hasPlaceholder {
-					return nil, err
-				}
-			}
-		}
-		if hasPlaceholder {
-			return nil, ErrIgnore
-		}
-	}
-
-	return nil, fmt.Errorf("%d次重试后失败: %v", maxRetries, lastErr)
-}
-
-// clientMap 用于缓存不同代理策略的 HTTP Client
-// key: "direct" 或 proxyUrl (e.g. "http://127.0.0.1:7890")
-// clientMapCache 使用 sync.Map 存储复用的 http.Client
-// Key: proxyAddr (string), Value: *http.Client
-var clientMapCache sync.Map
-
-// getClient 根据代理地址获取复用的 Client
-func getClient(proxyAddr string) *http.Client {
-	if v, ok := clientMapCache.Load(proxyAddr); ok {
-		return v.(*http.Client)
-	}
-
-	// 创建新的 Transport
-	transport := &http.Transport{
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: false},
-		MaxIdleConns:        100,              // 全局最大空闲连接
-		MaxIdleConnsPerHost: 20,               // 每个 Host 最大空闲连接
-		IdleConnTimeout:     90 * time.Second, // 空闲超时
-		DisableKeepAlives:   false,            // 开启长连接复用
-	}
-
-	// 设置代理
-	if proxyAddr != "direct" {
-		if u, err := url.Parse(proxyAddr); err == nil {
-			transport.Proxy = http.ProxyURL(u)
-		}
-	} else {
-		transport.Proxy = nil
-	}
-
-	// 创建 Client
-	// timeout := max(10, config.GlobalConfig.SubUrlsTimeout)
-	// 设置一个较大的超时，以在调用时控制超时
-	newClient := &http.Client{
-		Transport: transport,
-		Timeout:   60 * time.Second,
-	}
-
-	// LoadOrStore 保证并发安全：如果其他协程已经创建了，就用它的，否则用我的
-	actual, _ := clientMapCache.LoadOrStore(proxyAddr, newClient)
-	return actual.(*http.Client)
-}
-
-// fetchOnce 执行单次 HTTP 请求 (使用连接池)
-func fetchOnce(target string, useProxy bool, timeoutSec int, ua string) ([]byte, error, bool) {
-	// 1. 确定 Client Key
-	proxyKey := "direct"
-	if useProxy {
-		if p := config.GlobalConfig.SystemProxy; p != "" {
-			proxyKey = p // 使用代理地址作为 Key
-		}
-	}
-
-	// 2. 获取复用的 Client
-	client := getClient(proxyKey)
-
-	// 3. 创建带超时的连接
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
-
-	defer cancel()
-
-	// 4. 创建请求
-	req, err := http.NewRequestWithContext(ctx, "GET", target, nil)
+// identifyLocalSubType 识别本地订阅源类型
+func identifyLocalSubType(subURL, listenPort, storePort string) (isLatest, isHistory bool, tag string) {
+	u, err := url.Parse(subURL)
 	if err != nil {
-		return nil, err, false
-	}
-	if len(ua) <= 1 {
-		ua = convert.RandUserAgent()
-	}
-	req.Header.Set("User-Agent", ua)
-
-	// 4. 处理本地请求特殊 Header
-	if isLocalRequest(req.URL) {
-		req.Header.Set("X-From-Subs-Check-pro", "true")
-		req.Header.Set("X-API-Key", config.GlobalConfig.APIKey)
-		q := req.URL.Query()
-		q.Set("from_subs_check", "true")
-		req.URL.RawQuery = q.Encode()
+		return false, false, ""
 	}
 
-	// 5. 执行请求
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err, false
-	}
-	defer resp.Body.Close()
+	tag = u.Fragment
+	port := u.Port()
 
-	if resp.StatusCode >= 400 {
-		// 读取128KB，超过的放弃连接复用
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 128*1024))
-		slog.Debug("错误", "url", req.URL, "代理", useProxy, "状态码", resp.StatusCode, "UA", req.UserAgent())
-		fatal := resp.StatusCode == 401 || resp.StatusCode == 403 || resp.StatusCode == 404 || resp.StatusCode == 410
-		return nil, fmt.Errorf("%d", resp.StatusCode), fatal
+	// 必须是本地地址
+	if !utils.IsLocalURL(subURL) {
+		return false, false, tag
 	}
 
-	// 限制最大读取 100MB
-	const MaxLimit = 100 * 1024 * 1024
-
-	// 如果 Content-Length 存在且超过限制，直接报错，避免无谓的读取
-	if resp.ContentLength > MaxLimit {
-		return nil, fmt.Errorf("订阅文件过大: %d MB", resp.ContentLength/1024/1024), true
+	// 端口必须匹配当前服务端口或存储端口
+	if port != listenPort && port != storePort {
+		return false, false, tag
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxLimit))
-	if err != nil {
-		return nil, err, false
-	}
+	// 路径分类
+	path := u.Path
+	isLatest = strings.HasSuffix(path, "/all.yaml") || strings.HasSuffix(path, "/all.yml")
+	isHistory = strings.HasSuffix(path, "/history.yaml") || strings.HasSuffix(path, "/history.yml")
 
-	if len(body) >= MaxLimit {
-		return nil, fmt.Errorf("订阅文件超过 50MB 限制"), true
-	}
-
-	return body, nil, false
+	return isLatest, isHistory, tag
 }
 
 // saveStats 保存统计信息
@@ -732,4 +558,23 @@ func saveStats(subStats map[string]SubStat) {
 		_ = method.SaveToStats([]byte(validSB.String()), "sub-urls.yaml", "订阅排序")
 	}
 
+}
+
+func cleanMetadata(p map[string]any) {
+	delete(p, "sub_was_succeed")
+	delete(p, "sub_from_history")
+}
+
+// ClearCache 检测结束后释放包级全局状态
+func ClearCache() {
+	uniqueSubsCount = 0
+
+	// 关闭所有复用 client 的连接池，释放 TLS session cache 和 idle conn
+	clientMapCache.Range(func(key, value any) bool {
+		if c, ok := value.(*http.Client); ok {
+			c.CloseIdleConnections()
+		}
+		clientMapCache.Delete(key)
+		return true
+	})
 }

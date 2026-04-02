@@ -18,7 +18,6 @@ import (
 	"github.com/sinspired/subs-check-pro/assets"
 	"github.com/sinspired/subs-check-pro/check"
 	"github.com/sinspired/subs-check-pro/config"
-	proxyutils "github.com/sinspired/subs-check-pro/proxy"
 	"github.com/sinspired/subs-check-pro/save/method"
 	"github.com/sinspired/subs-check-pro/utils"
 )
@@ -278,7 +277,7 @@ func mergeUniqueProxies(proxyLists ...[]map[string]any) []map[string]any {
 		for _, p := range list {
 			delete(p, "sub_was_succeed")
 			delete(p, "sub_from_history")
-			key := proxyutils.GenerateProxyKey(p)
+			key := utils.GenerateProxyKey(p)
 			if !seen[key] {
 				seen[key] = true
 				result = append(result, p)

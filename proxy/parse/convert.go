@@ -1,138 +1,34 @@
-package proxies
+package parse
 
 import (
+	"fmt"
+	"log/slog"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
-	"log/slog"
+
+	"github.com/samber/lo"
+	"github.com/sinspired/subs-check-pro/utils"
+
 	"net/url"
-	"strconv"
-	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/metacubex/mihomo/common/convert"
-	"github.com/samber/lo"
 )
 
-// 协议映射表：Key 为常见的缩写或别名，Value 为标准协议头
-var protocolSchemes = map[string]string{
-	// Hysteria
-	"hysteria2": "hysteria2://", "hy2": "hysteria2://",
-	"hysteria": "hysteria://", "hy": "hysteria://",
-	// Standard
-	"http": "http://", "https": "https://",
-	"socks5": "socks5://", "socks5h": "socks5h://", "socks4": "socks4://", "socks": "socks://",
-	// V2Ray / Others
-	"vmess": "vmess://", "vless": "vless://",
-	"trojan":      "trojan://",
-	"shadowsocks": "ss://", "ss": "ss://", "ssr": "ssr://",
-	"tuic": "tuic://", "tuic5": "tuic://",
-	"juicity":   "juicity://",
-	"wireguard": "wireguard://", "wg": "wg://",
-	"mieru":  "mieru://",
-	"anytls": "anytls://",
-}
-
-// 越长的关键字越靠前，防止 "hysteria" 错误匹配到 "hysteria2"
-var sortedProtocolKeys = []string{
-	"shadowsocks", "hysteria2", "wireguard", "juicity", "hysteria", "socks5h", "socks4", "socks5",
-	"vless", "vmess", "trojan", "https", "http2", "tuic5", "mieru", "anytls",
-	"http", "tuic", "ssr", "hy2", "ss", "wg", "hy",
-}
-
-// extractClashProviderURLs 从 Clash/Mihomo 配置中提取 proxy-providers 的 url
-func extractClashProviderURLs(m map[string]any) []string {
-	if len(m) == 0 {
-		return nil
-	}
-	keys := []string{"proxy-providers", "proxy_providers", "proxyproviders"}
-	out := make([]string, 0, 8)
-	for _, k := range keys {
-		v, ok := m[k]
-		if !ok || v == nil {
-			continue
-		}
-		providers, ok := v.(map[string]any)
-		if !ok {
-			continue
-		}
-		for _, prov := range providers {
-			pm, ok := prov.(map[string]any)
-			if !ok {
-				continue
-			}
-			if u, ok := pm["url"].(string); ok {
-				u = strings.TrimSpace(u)
-				if u != "" {
-					out = append(out, u)
-				}
-			}
-		}
-	}
-	return out
-}
-
-// parseSubscriptionData 智能分发解析器
-func parseSubscriptionData(data []byte, subURL string) ([]ProxyNode, error) {
-	// 优先尝试带注释的 Sing-Box 配置
-	if nodes := ParseSingBoxWithMetadata(data); len(nodes) > 0 {
-		slog.Debug("解析成功", "订阅", subURL, "格式", "Sing-Box(Metadata)")
-		return nodes, nil
-	}
-
-	// 尝试 YAML/JSON 结构化解析
-	var generic any
-	if err := yaml.Unmarshal(data, &generic); err == nil {
-		switch val := generic.(type) {
-		case map[string]any:
-			// Clash 格式
-			if proxies, ok := val["proxies"].([]any); ok {
-				slog.Info("解析成功", "订阅", subURL, "格式", "Mihomo/Clash")
-				return convertListToNodes(proxies), nil
-			}
-			// Sing-Box 纯 JSON 格式
-			if outbounds, ok := val["outbounds"].([]any); ok {
-				slog.Info("解析成功", "订阅", subURL, "格式", "Sing-Box(JSON)")
-				return ConvertSingBoxOutbounds(outbounds), nil
-			}
-			// 非标准 JSON (协议名为 Key, e.g. {"vless": [...], "hysteria": [...]})
-			if nodes := ConvertProtocolMap(val); len(nodes) > 0 {
-				slog.Info("解析成功", "订阅", subURL, "格式", "Non-Standard JSON", "数量", len(nodes))
-				return nodes, nil
-			}
-		case []any:
-			if len(val) == 0 {
-				return nil, nil
-			}
-			if _, ok := val[0].(string); ok {
-				slog.Info("解析成功", "订阅", subURL, "格式", "String List")
-				strList := make([]string, 0, len(val))
-				for _, v := range val {
-					if s, ok := v.(string); ok {
-						strList = append(strList, s)
-					}
-				}
-				return ParseProxyLinksAndConvert(strList, subURL), nil
-			}
-			if _, ok := val[0].(map[string]any); ok {
-				slog.Debug("解析成功", "订阅", subURL, "格式", "General JSON List")
-				return ConvertGeneralJSONArray(val), nil
-			}
-		}
-	}
-
-	// ---------------------------------------------------------------
-	// 以下均为「行级」格式：同一文件可能同时命中多个解析器
-	// （例如：标准 vless:// + 非标准 mihomo 链接混合）
-	// 统一收集、去重合并，不再短路返回
-	// ---------------------------------------------------------------
-	return parseLineBasedFormats(data, subURL)
-}
+var (
+	v2rayRegexOnce         sync.Once
+	v2rayLinkRegexCompiled *regexp.Regexp
+)
 
 // ParseSingBoxWithMetadata 解析带注释元数据的 Sing-Box 配置文件
 // 处理形如 #profile-title: ... 开头，主体为 JSON 的文件
-func ParseSingBoxWithMetadata(data []byte) []ProxyNode {
+func ParseSingBoxWithMetadata(data []byte) []map[string]any {
 	// 快速特征检测：必须包含 outbounds 关键字
 	if !bytes.Contains(data, []byte("outbounds")) {
 		return nil
@@ -167,8 +63,8 @@ func ParseSingBoxWithMetadata(data []byte) []ProxyNode {
 }
 
 // ConvertSingBoxOutbounds 将 Sing-Box 的 outbounds 转换为 Clash 代理节点
-func ConvertSingBoxOutbounds(outbounds []any) []ProxyNode {
-	res := make([]ProxyNode, 0, len(outbounds))
+func ConvertSingBoxOutbounds(outbounds []any) []map[string]any {
+	res := make([]map[string]any, 0, len(outbounds))
 	ignoredTypes := map[string]struct{}{"selector": {}, "urltest": {}, "direct": {}, "block": {}, "dns": {}}
 
 	for _, ob := range outbounds {
@@ -181,7 +77,7 @@ func ConvertSingBoxOutbounds(outbounds []any) []ProxyNode {
 			continue
 		}
 
-		conv := ProxyNode{
+		conv := map[string]any{
 			"server": lo.CoalesceOrEmpty(fmt.Sprint(m["server"]), fmt.Sprint(m["server_address"])),
 			"port":   ToIntPort(m["server_port"]),
 			"name":   fmt.Sprint(m["tag"]),
@@ -255,7 +151,7 @@ func ConvertSingBoxOutbounds(outbounds []any) []ProxyNode {
 }
 
 // ConvertProtocolMap 处理非标准 JSON ({"vless": [...], "hysteria": [...]})
-func ConvertProtocolMap(con map[string]any) []ProxyNode {
+func ConvertProtocolMap(con map[string]any) []map[string]any {
 	var allLinks []string
 
 	// 遍历 Map，查找已知协议
@@ -313,8 +209,8 @@ func ConvertProtocolMap(con map[string]any) []ProxyNode {
 // ParseProxyLinksAndConvert 统一处理链接列表
 // 能够同时处理 WireGuard, SSR (手动解析) 和 V2Ray/Clash 支持的标准协议 (调用 Mihomo)
 // subURL 用于在猜测协议时提供上下文 (例如文件名包含 socks5)
-func ParseProxyLinksAndConvert(links []string, subURL string) []ProxyNode {
-	var finalNodes []ProxyNode
+func ParseProxyLinksAndConvert(links []string, subURL string) []map[string]any {
+	var finalNodes []map[string]any
 	var batchLinks []string
 
 	// 获取文件名推测的协议（作为上下文参考）
@@ -330,14 +226,14 @@ func ParseProxyLinksAndConvert(links []string, subURL string) []ProxyNode {
 		// 1. 优先处理手动解析的协议 (WG, SSR)
 		if strings.HasPrefix(link, "wireguard://") || strings.HasPrefix(link, "wg://") {
 			if node := ParseWireGuardURI(link); node != nil {
-				finalNodes = append(finalNodes, ProxyNode(node))
+				finalNodes = append(finalNodes, node)
 			}
 			continue
 		}
 
 		if strings.HasPrefix(link, "ssr://") {
 			if node := ParseSSRURI(link); node != nil {
-				finalNodes = append(finalNodes, ProxyNode(node))
+				finalNodes = append(finalNodes, node)
 			}
 			continue
 		}
@@ -408,17 +304,17 @@ func ParseProxyLinksAndConvert(links []string, subURL string) []ProxyNode {
 					slog.Debug("标准节点", "index", i, "node", string(nodeJSON))
 				}
 				patchXhttpOpts(nodes, data) // 补丁：修复 xhttp 缺失字段
-				finalNodes = append(finalNodes, ToProxyNodes(nodes)...)
+				finalNodes = append(finalNodes, ToNormalizeNodes(nodes)...)
 			}
 			// 扩展转换 ConvertsV2RayExtra 处理非标准/扩展协议链接
 			if nodes, err := ConvertsV2RayExtra(data); err == nil && len(nodes) > 0 {
 				slog.Info("扩展转换成功", "数量", len(nodes))
-				finalNodes = append(finalNodes, ToProxyNodes(nodes)...)
+				finalNodes = append(finalNodes, ToNormalizeNodes(nodes)...)
 			}
 		}
 
 		// 块处理完毕后统一去重
-		finalNodes = deduplicateNodes(finalNodes)
+		finalNodes = utils.DeduplicateNodes(finalNodes)
 	}
 
 	return finalNodes
@@ -523,8 +419,8 @@ func ParseSSRURI(link string) map[string]any {
 // ConvertGeneralJSONArray 处理通用对象数组 (主要是 Shadowsocks 导出的配置文件)
 // 兼容标准 Clash 节点对象 和 旧式 Shadowsocks (SIP008) 导出格式
 // 输入: [{"server": "...","server_port": 1234, ...}, {"type": "vmess", ...}]
-func ConvertGeneralJSONArray(list []any) []ProxyNode {
-	var nodes []ProxyNode
+func ConvertGeneralJSONArray(list []any) []map[string]any {
+	var nodes []map[string]any
 	// convertListToNodes(list) // 删除：返回值未接收，且后续逻辑需要手动映射字段
 
 	for _, item := range list {
@@ -536,7 +432,7 @@ func ConvertGeneralJSONArray(list []any) []ProxyNode {
 		// 1. 如果已经包含 "type" 字段，视为标准/已转换的节点，直接保留
 		if _, hasType := m["type"]; hasType {
 			// 复制一份 map 避免修改原始数据（可选）
-			node := ProxyNode(m)
+			node := m
 			// 如果有 remarks 且没有 name，进行映射
 			if name, ok := m["remarks"].(string); ok && name != "" && node["name"] == nil {
 				node["name"] = name
@@ -551,7 +447,7 @@ func ConvertGeneralJSONArray(list []any) []ProxyNode {
 		if _, hasPort := m["server_port"]; hasPort {
 			if _, hasMethod := m["method"]; hasMethod {
 				// 这是一个 Shadowsocks 节点
-				node := ProxyNode{
+				node := map[string]any{
 					"type":     "ss",
 					"server":   m["server"],
 					"port":     ToIntPort(m["server_port"]),
@@ -582,95 +478,21 @@ func ConvertGeneralJSONArray(list []any) []ProxyNode {
 	return nodes
 }
 
-func convertListToNodes(list []any) []ProxyNode {
+func convertListToNodes(list []any) []map[string]any {
 	slog.Debug("convertListToNodes", "list", list)
-	res := make([]ProxyNode, 0, len(list))
+	res := make([]map[string]any, 0, len(list))
 	for _, item := range list {
 		if m, ok := item.(map[string]any); ok {
-			res = append(res, ProxyNode(m))
+			res = append(res, m)
 		}
 	}
 	slog.Debug("convertListToNodes", "res", res)
 	return res
 }
 
-// parseLineBasedFormats 处理所有行级格式，收集全部结果后去重合并
-func parseLineBasedFormats(data []byte, subURL string) ([]ProxyNode, error) {
-	seen := make(map[string]struct{})
-	var merged []ProxyNode
-
-	add := func(nodes []ProxyNode, format string) {
-		before := len(merged)
-		for _, n := range nodes {
-			k := GenerateProxyKey(n)
-			if _, dup := seen[k]; dup {
-				continue
-			}
-			seen[k] = struct{}{}
-			merged = append(merged, n)
-		}
-		if added := len(merged) - before; added > 0 {
-			slog.Debug("行级解析命中", "订阅", subURL, "格式", format, "新增", added)
-		}
-	}
-
-	// ① Base64/V2Ray 标准转换
-	//    处理整体 base64 编码的订阅（不能省略，parseRawLines 无法处理 base64 blob）
-	if nodes, err := convert.ConvertsV2Ray(data); err == nil && len(nodes) > 0 {
-		patchXhttpOpts(nodes, data) // 补丁：修复 xhttp 缺失字段
-		add(ToProxyNodes(nodes), "Base64/V2Ray")
-	}
-
-	// ② 逐行解析（含 ConvertsV2RayExtra，处理非标准链接）
-	//    与 ① 互补：① 不认识的行，② 的 ConvertsV2RayExtra 可能认识
-	add(parseRawLines(data, subURL), "Raw Lines")
-
-	// ③ 局部合法的多段 proxies 块
-	add(ExtractAndParseProxies(data), "Multipart Proxies")
-
-	// ④ 逐行 YAML flow 格式
-	add(ParseYamlFlowList(data), "YAML Flow List")
-
-	// ⑤ Surge/Surfboard
-	if bytes.Contains(data, []byte("=")) &&
-		(bytes.Contains(data, []byte("[VMess]")) || bytes.Contains(data, []byte(", 20"))) {
-		add(ParseSurfboardProxies(data), "Surfboard/Surge")
-	}
-
-	// ⑥ xray JSON lines
-	add(ParseV2RayJSONLines(data), "V2Ray JSON Lines")
-
-	// ⑦ Bracket KV 格式
-	add(ParseBracketKVProxies(data), "Bracket KV")
-
-	if len(merged) > 0 {
-		slog.Debug("行级解析完成", "订阅", subURL, "总数量", len(merged))
-		return merged, nil
-	}
-
-	return nil, fmt.Errorf("未知格式")
-}
-
-// parseRawLines 读取纯文本行并交给统一解析器
-func parseRawLines(data []byte, subURL string) []ProxyNode {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	var lines []string
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line != "" && !strings.HasPrefix(line, "#") {
-			lines = append(lines, strings.TrimLeft(line, "- "))
-		}
-	}
-	if len(lines) == 0 {
-		return nil
-	}
-
-	return ParseProxyLinksAndConvert(lines, subURL)
-}
-
 // ExtractAndParseProxies 提取分散的 proxies: 块并解析
-func ExtractAndParseProxies(data []byte) []ProxyNode {
-	var nodes []ProxyNode
+func ExtractAndParseProxies(data []byte) []map[string]any {
+	var nodes []map[string]any
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	var buffer bytes.Buffer
 	inBlock := false
@@ -687,7 +509,8 @@ func ExtractAndParseProxies(data []byte) []ProxyNode {
 		if err := yaml.Unmarshal(buffer.Bytes(), &c); err == nil {
 			for _, p := range c.Proxies {
 				NormalizeNode(p)
-				nodes = append(nodes, ProxyNode(p))
+				nodes = append(nodes, p)
+
 			}
 		}
 		buffer.Reset()
@@ -709,15 +532,17 @@ func ExtractAndParseProxies(data []byte) []ProxyNode {
 
 		if inBlock {
 			// 保持块内容收集：空行、注释、或有缩进的行
-			if trim == "" || strings.HasPrefix(trim, "#") {
+			switch {
+			case trim == "", strings.HasPrefix(trim, "#"):
 				buffer.WriteString(line + "\n")
-			} else if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+			case strings.HasPrefix(line, " "), strings.HasPrefix(line, "\t"):
 				buffer.WriteString(line + "\n")
-			} else {
+			default:
 				// 缩进结束，块结束
 				inBlock = false
 				parseBuf()
 			}
+
 		}
 	}
 	// 处理文件末尾的块
@@ -730,8 +555,8 @@ func ExtractAndParseProxies(data []byte) []ProxyNode {
 // ParseYamlFlowList 逐行解析 YAML 流式列表 (容错模式)
 // 专门处理格式错误或缩进错误的 Clash 格式列表，例如：
 // - {name: ...}
-func ParseYamlFlowList(data []byte) []ProxyNode {
-	var nodes []ProxyNode
+func ParseYamlFlowList(data []byte) []map[string]any {
+	var nodes []map[string]any
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 
 	// 这里的 buffer 用于 scanner，防止单行过长导致 panic
@@ -786,7 +611,7 @@ func ParseYamlFlowList(data []byte) []ProxyNode {
 				NormalizeNode(m)
 				// 解析后再次校验关键字段，确保数据的完整性
 				if _, hasServer := m["server"]; hasServer {
-					nodes = append(nodes, ProxyNode(m))
+					nodes = append(nodes, m)
 				}
 			}
 		}
@@ -804,8 +629,8 @@ func ParseYamlFlowList(data []byte) []ProxyNode {
 
 // ParseV2RayJSONLines 解析 xray-json
 // 这是一个简化的实现，提取核心字段
-func ParseV2RayJSONLines(data []byte) []ProxyNode {
-	var nodes []ProxyNode
+func ParseV2RayJSONLines(data []byte) []map[string]any {
+	var nodes []map[string]any
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 
 	// 增加缓冲区以处理长行 JSON
@@ -862,7 +687,7 @@ func ParseV2RayJSONLines(data []byte) []ProxyNode {
 		// 优先使用 tag 作为名称，如果没有则使用 address
 		name := lo.CoalesceOrEmpty(fmt.Sprint(out["tag"]), fmt.Sprint(out["ps"]), "v2ray-json")
 
-		node := ProxyNode{
+		node := map[string]any{
 			"name":   name,
 			"server": address,
 			"port":   port,
@@ -976,14 +801,14 @@ func ParseV2RayJSONLines(data []byte) []ProxyNode {
 
 // ParseSurfboardProxies 解析 Surge/Surfboard 格式
 // 复用 ParseBracketKVProxies 的逻辑
-func ParseSurfboardProxies(data []byte) []ProxyNode {
+func ParseSurfboardProxies(data []byte) []map[string]any {
 	return ParseBracketKVProxies(data)
 }
 
 // ParseBracketKVProxies 解析自定义格式: [Type] Name = key=val, ...
 // 兼容 Surge / Surfboard / Quantumult X 的 [Proxy] 格式
-func ParseBracketKVProxies(data []byte) []ProxyNode {
-	var nodes []ProxyNode
+func ParseBracketKVProxies(data []byte) []map[string]any {
+	var nodes []map[string]any
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		lineBytes := scanner.Bytes()               // 使用 Bytes 避免 string 分配
@@ -1087,7 +912,57 @@ func ParseBracketKVProxies(data []byte) []ProxyNode {
 		}
 
 		NormalizeNode(node)
-		nodes = append(nodes, ProxyNode(node))
+		nodes = append(nodes, node)
 	}
 	return nodes
+}
+
+// ToNormalizeNodes 将 Mihomo 的转换结果进行标准化输出
+func ToNormalizeNodes(list []map[string]any) []map[string]any {
+	if list == nil {
+		return nil
+	}
+	for i, v := range list {
+		// 立即进行标准化，防止后续处理遇到类型不一致问题
+		NormalizeNode(v)
+		list[i] = v
+	}
+	return list
+}
+
+// ExtractV2RayLinks 正则提取逻辑
+func ExtractV2RayLinks(data []byte) []string {
+	var links []string
+	v2rayRegexOnce.Do(func() {
+		// 动态构建正则，匹配所有已知协议头
+		schemes := make([]string, 0, len(protocolSchemes))
+		seen := make(map[string]bool)
+		for _, p := range protocolSchemes {
+			s := strings.TrimSuffix(strings.ToLower(p), "://")
+			if !seen[s] && s != "" {
+				schemes = append(schemes, regexp.QuoteMeta(s))
+				seen[s] = true
+			}
+		}
+		// 模式: 单词边界 + 协议 + :// + 非空白/引号/括号字符
+		pattern := `(?i)\b(` + strings.Join(schemes, `|`) + `)://[^\s"'<>\)\]]+`
+		v2rayLinkRegexCompiled = regexp.MustCompile(pattern)
+	})
+
+	links = v2rayLinkRegexCompiled.FindAllString(string(data), -1)
+
+	if len(links) == 0 {
+		return links
+	}
+
+	// 简单清洗结果
+	out := make([]string, 0, len(links))
+	for _, s := range links {
+		t := strings.Trim(s, "\"'`,;：")
+		if t != "" {
+			slog.Debug("正则捕获", "raw", s, "cleaned", t)
+			out = append(out, t)
+		}
+	}
+	return lo.Uniq(out)
 }

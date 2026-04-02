@@ -1,4 +1,4 @@
-package proxies
+package parse
 
 import (
 	"bytes"
@@ -9,15 +9,15 @@ import (
 	"strings"
 )
 
-// ConvertsV2RayExtra convert V2Ray subscribe proxies data to mihomo proxies config
+// ConvertsV2RayExtra 转换一些非标 mihomo 格式
 func ConvertsV2RayExtra(buf []byte) ([]map[string]any, error) {
 	slog.Debug("解析非标mihomo格式")
-	// TODO: 支持更多非标格式，支持标准mieru分享格式
-	// 仅当整体内容不含明显协议头时才尝试 base64 解码
+	// 整体 base64 解码（无协议头时）
 	data := buf
 	if !bytes.Contains(buf, []byte("://")) {
-		data = DecodeBase64(buf)
+		data = TryDecodeBase64(buf)
 	}
+
 	arr := strings.Split(string(data), "\n")
 
 	proxies := make([]map[string]any, 0, len(arr))
@@ -36,8 +36,9 @@ func ConvertsV2RayExtra(buf []byte) ([]map[string]any, error) {
 
 		scheme = strings.ToLower(scheme)
 		switch scheme {
+		// TODO: 支持更多非标格式，支持标准mieru分享格式
 		case "mieru":
-			dcBuf, err := TryDecodeBase64Mihomo(body)
+			dcBuf, err := TryDecodeBase64WithError(body)
 			if err != nil {
 				continue
 			}
@@ -94,10 +95,10 @@ func ConvertsV2RayExtra(buf []byte) ([]map[string]any, error) {
 				mieru["multiplexing"] = "MULTIPLEXING_LOW"
 			}
 
-			// // 保留 profile 字段
-			// if profile := query.Get("profile"); profile != "" {
-			// 	mieru["profile"] = profile
-			// }
+			// 保留 profile 字段
+			if profile := query.Get("profile"); profile != "" {
+				mieru["profile"] = profile
+			}
 
 			proxies = append(proxies, mieru)
 		case "anytls":
@@ -142,24 +143,7 @@ func ConvertsV2RayExtra(buf []byte) ([]map[string]any, error) {
 	return proxies, nil
 }
 
-func uniqueName(names map[string]int, name string) string {
-	if index, ok := names[name]; ok {
-		index++
-		names[name] = index
-		if index < 10 {
-			name = name + "-0" + strconv.Itoa(index)
-		} else {
-			name = name + "-" + strconv.Itoa(index)
-		}
-	} else {
-		index = 0
-		names[name] = index
-	}
-	return name
-}
-
-// patchXhttpOpts 临时修复 ConvertsV2Ray 对 xhttp 节点缺失 opts 的 bug
-// 当上游 Mihomo 修复后，直接删除此函数和调用点即可
+// patchXhttpOpts 修复 ConvertsV2Ray 对 xhttp 节点缺失 opts 的 bug
 func patchXhttpOpts(nodes []map[string]any, rawData []byte) {
 	// 构建 server|port|uuid → 原始 URL 的查找表
 	// 只处理 xhttp vless，避免无谓开销
@@ -215,4 +199,20 @@ func patchXhttpOpts(nodes []map[string]any, rawData []byte) {
 			slog.Debug("xhttp-opts 补丁已应用", "server", server, "port", port)
 		}
 	}
+}
+
+func uniqueName(names map[string]int, name string) string {
+	if index, ok := names[name]; ok {
+		index++
+		names[name] = index
+		if index < 10 {
+			name = name + "-0" + strconv.Itoa(index)
+		} else {
+			name = name + "-" + strconv.Itoa(index)
+		}
+	} else {
+		index = 0
+		names[name] = index
+	}
+	return name
 }

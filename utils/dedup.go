@@ -1,4 +1,4 @@
-package proxies
+package utils
 
 import (
 	"fmt"
@@ -169,7 +169,23 @@ func GenerateProxyKey(p map[string]any) string {
 	return sb.String()
 }
 
-// --- 辅助函数 ---
+// DeduplicateNodes 节点去重
+func DeduplicateNodes(nodes []map[string]any) []map[string]any {
+	if len(nodes) == 0 {
+		return nodes
+	}
+	seen := make(map[string]struct{}, len(nodes))
+	out := nodes[:0] // 原地复用，减少分配
+	for _, n := range nodes {
+		k := GenerateProxyKey(n)
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, n)
+	}
+	return out
+}
 
 // cleanDomain 验证并清洗域名，统一小写
 func cleanDomain(s string) string {

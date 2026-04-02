@@ -1,11 +1,8 @@
-package proxies
+package parse
 
 import (
 	"testing"
 )
-
-// 假设 protocolSchemes 和 sortedProtocolKeys 已经在其他地方定义并初始化
-// 这里我们只测试 guessSchemeByURL 的逻辑
 
 func TestGuessSchemeByURL(t *testing.T) {
 	tests := []struct {
