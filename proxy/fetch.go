@@ -130,6 +130,12 @@ func FetchSubsData(rawURL string) ([]byte, error) {
 				if fatal && !hasPlaceholder {
 					return nil, err
 				}
+
+				// 401/403 时给一个提示，方便调试
+				if code, convErr := strconv.Atoi(err.Error()); convErr == nil &&
+					(code == 401 || code == 403) && strat.useProxy {
+					slog.Debug("代理访问被拒，尝试下一策略", "URL", targetURL, "status", code)
+				}
 			}
 		}
 		if hasPlaceholder {
@@ -225,7 +231,8 @@ func fetchOnce(target string, useProxy bool, timeoutSec int, ua string) ([]byte,
 		// 读取128KB，超过的放弃连接复用
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 128*1024))
 		slog.Debug("错误", "url", req.URL, "代理", useProxy, "状态码", resp.StatusCode, "UA", req.UserAgent())
-		fatal := resp.StatusCode == 401 || resp.StatusCode == 403 || resp.StatusCode == 404 || resp.StatusCode == 410
+		// 401/403 仅是"访问受阻"，不阻断后续策略
+		fatal := resp.StatusCode == 404 || resp.StatusCode == 410
 		return nil, fmt.Errorf("%d", resp.StatusCode), fatal
 	}
 
