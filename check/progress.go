@@ -186,7 +186,7 @@ func (pt *ProgressTracker) refresh() {
 
 // refreshDynamic 根据各阶段完成率的加权和来计算进度，支持中途停止信号
 func (pt *ProgressTracker) refreshDynamic() {
-	stopped := Successlimited.Load() || ForceClose.Load()
+	stopped := Successlimited.Load() || ForceClose.Load() || ProcessResults.Load()
 
 	// 1. 确定计算基数（分母）
 	// 如果触发了限制（成功数达到 or 强制关闭），分母不再是总订阅数，而是“实际已测活数”

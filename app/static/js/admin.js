@@ -960,6 +960,9 @@ import { initQuickPreview } from './cfg-quickpreview.js';
     // --- 3. ETA 文字（后端值，替换原计算段） ---
     let etaText = ''
     if (processResults) {
+      if (els.progressPercentTitle) els.progressPercentTitle.textContent = "保存中"
+      els.progressPercent.textContent = '...'
+      els.progressPercent.style.display = ''
       etaText = '正在保存检测结果...'
       if (els.statusEl) els.statusEl.className = 'muted status-label status-stopping'
     } else if (forceClose) {
@@ -981,6 +984,7 @@ import { initQuickPreview } from './cfg-quickpreview.js';
         els.statusEl.title = runSec > 0 ? `已运行: ${runSec}s` : ''
 
         if (processed === 0 && !processResults && !forceClose && !successlimited) {
+          if (els.progressPercentTitle) els.progressPercentTitle.textContent = "获取订阅"
           els.statusEl.textContent = '正在获取订阅...'
           els.statusEl.className = 'muted status-label status-prepare'
         } else if (processResults) {
@@ -992,6 +996,9 @@ import { initQuickPreview } from './cfg-quickpreview.js';
           els.statusEl.innerHTML = `${checking_SPINNER}<span>已启动, 计算剩余时间...</span>`
           els.statusEl.className = 'muted status-label status-calculating'
         } else if (!etaText) {
+          if (els.progressPercentTitle) els.progressPercentTitle.textContent = "保存中"
+          els.progressPercent.textContent = '...'
+          els.progressPercent.style.display = ''
           els.statusEl.innerHTML = `<span>正在保存检测结果...</span>`
           els.statusEl.className = 'muted status-label status-process'
         } else if (etaText) {
