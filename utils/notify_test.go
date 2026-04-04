@@ -8,7 +8,9 @@ import (
 
 var TestAPI = "https://apprise.linkpc.dpdns.org/notify"
 var TestURLs = []string{
+	"tgram://7542214181:AAH-J2AQ67P-Y2xRyCioy52qFCDMmRnx3lA/-1002589575863:1578",
 	"ntfy://subs-check-pro",
+	"bark://api.day.app/aecAJbCLka8TCP6uRU8Xae",
 	// "bark://api.day.app/xxxxxxxxxxxxxxx",
 	// "tgram://xxxxxxxxxxxxxxxxxxx/xxxxxxxxxxxxxxxx",
 	// "mailto://xxxxxxxx:yyyyyyyyy@qq.com",
@@ -53,5 +55,5 @@ func TestSendNotifyDetectLatestRelease(t *testing.T) {
 	withTestConfig()
 
 	// 验证函数能正常执行，不返回错误
-	SendNotifyDetectLatestRelease("v1.2.3", "2.0.0", true, false, "https://github.com/sinspired/subs-check-pro/releases/download/v2.0.0/subs-check-pro_Windows_x86_64.zip")
+	SendNotifyDetectLatestRelease("v1.2.3", "2.0.0", false, true, "https://github.com/sinspired/subs-check-pro/releases/download/v2.0.0/subs-check-pro_Windows_x86_64.zip")
 }
